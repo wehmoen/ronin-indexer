@@ -9,7 +9,7 @@ use web3::types::{BlockId, BlockNumber};
 use web3::Web3;
 
 use crate::mongo::collections::axie_transfer::AxieTransfer;
-use crate::mongo::collections::wallet::{WalletActivity, WalletProvider};
+use crate::mongo::collections::wallet::WalletActivity;
 use crate::mongo::collections::{erc_transfer::ERCTransfer, Block};
 use crate::mongo::Database;
 
@@ -233,6 +233,8 @@ impl Ronin {
         println!("[INFO] Streaming from {} to {}", &start, &stream_stop_block);
 
         let mut current_block: Block = start.clone();
+
+        let mut wallet_update_global_pool: HashMap<String, WalletActivity> = HashMap::new();
 
         loop {
             let block = self
@@ -521,15 +523,29 @@ impl Ronin {
                     .ok();
 
                 let wallet_update_num = wallet_update_pool.len();
-                let _ = WalletProvider::bulk(self.database.wallets.clone(), wallet_update_pool);
+
+                wallet_update_global_pool.extend(wallet_update_pool);
+
+                if wallet_update_global_pool.len() > 5000 {
+                    println!(
+                        "Pushing {} wallet updates! Please wait. This might take a while!",
+                        wallet_update_global_pool.len()
+                    );
+                    self.database
+                        .wallets
+                        .bulk(wallet_update_global_pool.to_owned())
+                        .await;
+                    wallet_update_global_pool.clear();
+                }
 
                 println!(
-                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tAxie Transfers: {:>5}\tWallet Updates: {:>5}",
+                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tAxie Transfers: {:>5}\tWallet Updates: {:>5}\tWallet Update Queue: {:>6}",
                     &current_block,
                     num_txs,
                     erc_transfer_pool.len(),
                     axie_transfer_pool.len(),
-                    wallet_update_num
+                    wallet_update_num,
+                    wallet_update_global_pool.len()
                 );
             }
 

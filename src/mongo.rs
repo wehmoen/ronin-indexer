@@ -74,22 +74,20 @@ pub mod collections {
     }
     pub mod wallet {
         use std::collections::HashMap;
-        use std::thread;
 
         use mongodb::bson::doc;
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
-        use web3::futures::FutureExt;
 
         use crate::mongo::collections::{Address, Block, TransactionHash};
 
-        #[derive(Serialize, Deserialize)]
+        #[derive(Serialize, Deserialize, Clone)]
         pub struct WalletActivity {
             pub block: Block,
             pub transaction: TransactionHash,
         }
 
-        #[derive(Serialize, Deserialize)]
+        #[derive(Serialize, Deserialize, Clone)]
         pub struct Wallet {
             address: Address,
             first_seen: WalletActivity,
@@ -102,21 +100,12 @@ pub mod collections {
         }
 
         impl WalletProvider {
-            pub async fn bulk(
-                wallet_provider: WalletProvider,
-                map: HashMap<String, WalletActivity>,
-            ) {
-                thread::spawn(move || {
-                    let map = map.into_iter();
-                    let _ = async {
-                        for (address, activity) in map {
-                            wallet_provider
-                                .update(address, activity.block, activity.transaction)
-                                .await;
-                        }
-                    }
-                    .now_or_never();
-                });
+            pub async fn bulk(&self, map: HashMap<String, WalletActivity>) {
+                let map = map.into_iter();
+                for (address, activity) in map {
+                    self.update(address, activity.block, activity.transaction)
+                        .await
+                }
             }
 
             //Todo: Compute the actual last seen tx for any address before invoking update. Otherwise there can be multiple updates per address per block.
@@ -152,15 +141,13 @@ pub mod collections {
                                     None,
                                 )
                                 .await
-                                .expect("Failed to update existing wallet in database!");
+                                .ok();
+                            // .expect("Failed to update existing wallet in database!");
                         }
                     }
                     None => {
                         let wallet = Wallet::new(address.clone(), block, transaction);
-                        self.collection
-                            .insert_one(wallet, None)
-                            .await
-                            .expect("Failed to insert new wallet to database!");
+                        self.collection.insert_one(wallet, None).await.ok();
                     }
                 }
             }
