@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::collections::HashMap;
 
 use mongodb::bson::DateTime;
@@ -6,17 +5,18 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use web3::ethabi::{Event, EventParam, ParamType, RawLog};
 use web3::transports::{Either, Http, WebSocket};
-use web3::types::{BlockId, BlockNumber, Transaction};
+use web3::types::{BlockId, BlockNumber};
 use web3::Web3;
 
 use crate::mongo::collections::axie_transfer::AxieTransfer;
+use crate::mongo::collections::wallet::{WalletActivity, WalletProvider};
 use crate::mongo::collections::{erc_transfer::ERCTransfer, Block};
 use crate::mongo::Database;
 
 const ERC_TRANSFER_TOPIC: &str =
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
-const AXIE_SALE_TOPIC: &str = "0c0258cd7f0d9474f62106c6981c027ea54bee0b323ea1991f4caa7e288a5725";
+//const AXIE_SALE_TOPIC: &str = "0c0258cd7f0d9474f62106c6981c027ea54bee0b323ea1991f4caa7e288a5725"; // Todo: Implement axie sale indexing
 
 pub struct Ronin {
     database: Database,
@@ -252,26 +252,26 @@ impl Ronin {
                 let mut tx_pool: Vec<crate::mongo::collections::transaction::Transaction> = vec![];
                 let mut erc_transfer_pool: Vec<ERCTransfer> = vec![];
                 let mut axie_transfer_pool: Vec<AxieTransfer> = vec![];
+                let mut wallet_update_pool: HashMap<String, WalletActivity> = HashMap::new();
 
                 for tx in block.transactions {
-                    // // Updating Wallets
-                    // self.database
-                    //     .wallets
-                    //     .update(
-                    //         web3::helpers::to_string(&tx.from).replace("\"", ""),
-                    //         block.number.unwrap().as_u64(),
-                    //         web3::helpers::to_string(&tx.hash).replace("\"", ""),
-                    //     )
-                    //     .await;
-                    //
-                    // self.database
-                    //     .wallets
-                    //     .update(
-                    //         web3::helpers::to_string(&tx.to).replace("\"", ""),
-                    //         block.number.unwrap().as_u64(),
-                    //         web3::helpers::to_string(&tx.hash).replace("\"", ""),
-                    //     )
-                    //     .await;
+                    let tx_from = web3::helpers::to_string(&tx.from).replace("\"", "");
+                    let tx_to = web3::helpers::to_string(&tx.to).replace("\"", "");
+                    wallet_update_pool.insert(
+                        tx_from,
+                        WalletActivity {
+                            block: block.number.unwrap().as_u64(),
+                            transaction: web3::helpers::to_string(&tx.hash).replace("\"", ""),
+                        },
+                    );
+
+                    wallet_update_pool.insert(
+                        tx_to,
+                        WalletActivity {
+                            block: block.number.unwrap().as_u64(),
+                            transaction: web3::helpers::to_string(&tx.hash).replace("\"", ""),
+                        },
+                    );
 
                     let receipt: web3::types::TransactionReceipt = self
                         .provider
@@ -297,7 +297,6 @@ impl Ronin {
                                     let contract_address =
                                         web3::helpers::to_string(&log.address).replace("\"", "");
 
-                                    /** HERE IS A TRANSFER **/
                                     match contracts.get(&contract_address.as_str()) {
                                         None => continue,
                                         Some(contract) => match contract.erc {
@@ -320,6 +319,27 @@ impl Ronin {
                                                 )
                                                 .replace("\"", "");
                                                 let to = f!("0x{to}");
+
+                                                wallet_update_pool.insert(
+                                                    from.clone(),
+                                                    WalletActivity {
+                                                        block: block.number.unwrap().as_u64(),
+                                                        transaction: web3::helpers::to_string(
+                                                            &tx.hash,
+                                                        )
+                                                        .replace("\"", ""),
+                                                    },
+                                                );
+                                                wallet_update_pool.insert(
+                                                    to.clone(),
+                                                    WalletActivity {
+                                                        block: block.number.unwrap().as_u64(),
+                                                        transaction: web3::helpers::to_string(
+                                                            &tx.hash,
+                                                        )
+                                                        .replace("\"", ""),
+                                                    },
+                                                );
 
                                                 let signature = ERCTransfer::get_transfer_id(
                                                     web3::helpers::to_string(&log.transaction_hash)
@@ -378,6 +398,27 @@ impl Ronin {
                                                 )
                                                 .replace("\"", "");
                                                 let to = f!("0x{to}");
+
+                                                wallet_update_pool.insert(
+                                                    from.clone(),
+                                                    WalletActivity {
+                                                        block: block.number.unwrap().as_u64(),
+                                                        transaction: web3::helpers::to_string(
+                                                            &tx.hash,
+                                                        )
+                                                        .replace("\"", ""),
+                                                    },
+                                                );
+                                                wallet_update_pool.insert(
+                                                    to.clone(),
+                                                    WalletActivity {
+                                                        block: block.number.unwrap().as_u64(),
+                                                        transaction: web3::helpers::to_string(
+                                                            &tx.hash,
+                                                        )
+                                                        .replace("\"", ""),
+                                                    },
+                                                );
 
                                                 let signature = ERCTransfer::get_transfer_id(
                                                     web3::helpers::to_string(&log.transaction_hash)
@@ -479,12 +520,16 @@ impl Ronin {
                     .await
                     .ok();
 
+                let wallet_update_num = wallet_update_pool.len();
+                let _ = WalletProvider::bulk(self.database.wallets.clone(), wallet_update_pool);
+
                 println!(
-                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tAxie Transfers: {:>5}",
+                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tAxie Transfers: {:>5}\tWallet Updates: {:>5}",
                     &current_block,
                     num_txs,
                     erc_transfer_pool.len(),
                     axie_transfer_pool.len(),
+                    wallet_update_num
                 );
             }
 

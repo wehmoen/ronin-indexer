@@ -1,10 +1,11 @@
+use mongodb::Collection;
+
 use crate::mongo::collections::statistic::StatisticProvider;
 use crate::mongo::collections::wallet::Wallet;
 use crate::mongo::collections::{
     axie_transfer::AxieTransfer, erc_transfer::ERCTransfer, statistic::Statistic,
     transaction::Transaction, wallet::WalletProvider,
 };
-use mongodb::Collection;
 
 pub struct Database {
     pub wallets: WalletProvider,
@@ -19,6 +20,7 @@ pub mod collections {
     pub type TransactionHash = String;
     pub type Block = u64;
 
+    // Todo: Convert to a key:value storage and rename to settings
     pub mod statistic {
         use mongodb::bson::doc;
         use mongodb::options::UpdateOptions;
@@ -71,6 +73,9 @@ pub mod collections {
         }
     }
     pub mod wallet {
+        use std::collections::HashMap;
+        use std::thread;
+
         use mongodb::bson::doc;
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
@@ -79,8 +84,8 @@ pub mod collections {
 
         #[derive(Serialize, Deserialize)]
         pub struct WalletActivity {
-            block: Block,
-            transaction: TransactionHash,
+            pub block: Block,
+            pub transaction: TransactionHash,
         }
 
         #[derive(Serialize, Deserialize)]
@@ -90,11 +95,28 @@ pub mod collections {
             last_seen: WalletActivity,
         }
 
+        #[derive(Clone)]
         pub struct WalletProvider {
             collection: Collection<Wallet>,
         }
 
         impl WalletProvider {
+            pub async fn bulk(
+                wallet_provider: WalletProvider,
+                map: HashMap<String, WalletActivity>,
+            ) {
+                thread::spawn(move || {
+                    let map = map.into_iter();
+                    let _ = async {
+                        for (address, activity) in map {
+                            wallet_provider
+                                .update(address, activity.block, activity.transaction)
+                                .await;
+                        }
+                    };
+                });
+            }
+
             //Todo: Compute the actual last seen tx for any address before invoking update. Otherwise there can be multiple updates per address per block.
             pub async fn update(
                 &self,
@@ -102,7 +124,7 @@ pub mod collections {
                 block: Block,
                 transaction: TransactionHash,
             ) {
-                let mut wallet = self
+                let wallet = self
                     .collection
                     .find_one(doc! {"address": &address}, None)
                     .await
@@ -175,12 +197,11 @@ pub mod collections {
     }
     pub mod erc_transfer {
         use serde::{Deserialize, Serialize};
+        use sha2::digest::Update;
+        use sha2::{Digest, Sha256};
 
         use crate::mongo::collections::{Address, Block};
         use crate::ronin::ContractType;
-
-        use sha2::digest::Update;
-        use sha2::{Digest, Sha256};
 
         #[derive(Serialize, Deserialize, Debug, Clone)]
         pub struct ERCTransfer {
@@ -205,12 +226,12 @@ pub mod collections {
         }
     }
     pub mod axie_transfer {
-        use crate::mongo::collections::{Address, Block};
         use mongodb::bson::DateTime;
         use serde::{Deserialize, Serialize};
-
         use sha2::digest::Update;
         use sha2::{Digest, Sha256};
+
+        use crate::mongo::collections::{Address, Block};
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
         pub struct AxieTransfer {
