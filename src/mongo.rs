@@ -20,6 +20,9 @@ pub mod collections {
     pub type Block = u64;
 
     pub mod statistic {
+        use mongodb::bson::doc;
+        use mongodb::options::UpdateOptions;
+        use mongodb::results::UpdateResult;
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
 
@@ -36,6 +39,23 @@ pub mod collections {
         impl StatisticProvider {
             pub fn new(collection: Collection<Statistic>) -> StatisticProvider {
                 StatisticProvider { collection }
+            }
+
+            pub async fn update(&self, block: Block) -> mongodb::error::Result<UpdateResult> {
+                let options = UpdateOptions::builder().upsert(Some(true)).build();
+                self.collection
+                    .update_one(
+                        doc! {},
+                        {
+                            doc! {
+                                "$set": {
+                                    "last_block": block as i64
+                                }
+                            }
+                        },
+                        options,
+                    )
+                    .await
             }
 
             pub async fn last_block(&self) -> Option<Block> {

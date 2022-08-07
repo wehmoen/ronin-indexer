@@ -490,7 +490,7 @@ impl Ronin {
 
             self.database
                 .statistics
-                .set_last_block(current_block)
+                .update(current_block)
                 .await
                 .expect("Failed to write latest block to database!");
 
