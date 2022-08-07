@@ -220,12 +220,10 @@ impl Ronin {
             .expect("Failed to retrieve head block number from chain!");
         let stream_stop_block: Block = chain_head_block.as_u64() - offset;
 
-        // let start: Block = match replay {
-        //     true => 0i128,
-        //     false => self.database.statistics.last_block().await.unwrap(),
-        // };
-
-        let start: Block = 15000000;
+        let start: Block = match replay {
+            true => 0u64,
+            false => self.database.statistics.last_block().await.unwrap(),
+        };
 
         if start >= stream_stop_block {
             println!("[INFO] Offset not large enough. Exiting!");
@@ -490,9 +488,15 @@ impl Ronin {
                 );
             }
 
+            self.database
+                .statistics
+                .set_last_block(current_block)
+                .await
+                .expect("Failed to write latest block to database!");
+
             current_block = current_block + 1u64;
 
-            if current_block > 15000100 {
+            if current_block >= stream_stop_block {
                 break;
             }
         }
