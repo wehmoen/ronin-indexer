@@ -254,24 +254,24 @@ impl Ronin {
                 let mut axie_transfer_pool: Vec<AxieTransfer> = vec![];
 
                 for tx in block.transactions {
-                    // Updating Wallets
-                    self.database
-                        .wallets
-                        .update(
-                            web3::helpers::to_string(&tx.from).replace("\"", ""),
-                            block.number.unwrap().as_u64(),
-                            web3::helpers::to_string(&tx.hash).replace("\"", ""),
-                        )
-                        .await;
-
-                    self.database
-                        .wallets
-                        .update(
-                            web3::helpers::to_string(&tx.to).replace("\"", ""),
-                            block.number.unwrap().as_u64(),
-                            web3::helpers::to_string(&tx.hash).replace("\"", ""),
-                        )
-                        .await;
+                    // // Updating Wallets
+                    // self.database
+                    //     .wallets
+                    //     .update(
+                    //         web3::helpers::to_string(&tx.from).replace("\"", ""),
+                    //         block.number.unwrap().as_u64(),
+                    //         web3::helpers::to_string(&tx.hash).replace("\"", ""),
+                    //     )
+                    //     .await;
+                    //
+                    // self.database
+                    //     .wallets
+                    //     .update(
+                    //         web3::helpers::to_string(&tx.to).replace("\"", ""),
+                    //         block.number.unwrap().as_u64(),
+                    //         web3::helpers::to_string(&tx.hash).replace("\"", ""),
+                    //     )
+                    //     .await;
 
                     let receipt: web3::types::TransactionReceipt = self
                         .provider
