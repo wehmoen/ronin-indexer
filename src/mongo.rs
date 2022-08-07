@@ -79,6 +79,7 @@ pub mod collections {
         use mongodb::bson::doc;
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
+        use web3::futures::FutureExt;
 
         use crate::mongo::collections::{Address, Block, TransactionHash};
 
@@ -113,7 +114,8 @@ pub mod collections {
                                 .update(address, activity.block, activity.transaction)
                                 .await;
                         }
-                    };
+                    }
+                    .now_or_never();
                 });
             }
 
