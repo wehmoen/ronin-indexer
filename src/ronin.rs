@@ -39,6 +39,12 @@ pub struct Contract {
 
 pub type ContractList = HashMap<&'static str, Contract>;
 
+#[derive(Serialize, Deserialize)]
+struct LargestBlock {
+    number: Block,
+    tx_num: u64,
+}
+
 impl Ronin {
     pub fn transfer_events() -> HashMap<ContractType, Event> {
         let mut map: HashMap<ContractType, Event> = HashMap::new();
@@ -218,12 +224,28 @@ impl Ronin {
             .block_number()
             .await
             .expect("Failed to retrieve head block number from chain!");
+
         let stream_stop_block: Block = chain_head_block.as_u64() - offset;
 
         let start: Block = match replay {
-            true => 0u64,
-            false => self.database.statistics.last_block().await.unwrap(),
+            true => 1,
+            false => {
+                let last_db_block = self.database.settings.get("last_block").await;
+                match last_db_block {
+                    None => 1,
+                    Some(settings) => settings.value.parse::<u64>().unwrap(),
+                }
+            }
         };
+
+        let mut largest_block_by_tx_num: LargestBlock =
+            match self.database.settings.get("largest_block_by_tx_num").await {
+                None => LargestBlock {
+                    number: 0,
+                    tx_num: 0,
+                },
+                Some(settings) => serde_json::from_str(settings.value.as_str()).unwrap(),
+            };
 
         if start >= stream_stop_block {
             println!("[INFO] Offset not large enough. Exiting!");
@@ -250,6 +272,21 @@ impl Ronin {
             let num_txs = block.transactions.len();
 
             if num_txs > 0 {
+                if num_txs as u64 > largest_block_by_tx_num.tx_num {
+                    largest_block_by_tx_num = LargestBlock {
+                        number: block_number,
+                        tx_num: num_txs as u64,
+                    };
+                    self.database
+                        .settings
+                        .set(
+                            "largest_block_by_tx_num",
+                            serde_json::to_string(&largest_block_by_tx_num).unwrap(),
+                        )
+                        .await
+                        .expect("Failed to store largest_block_by_tx_num!");
+                }
+
                 let mut tx_pool: Vec<crate::mongo::collections::transaction::Transaction> = vec![];
                 let mut erc_transfer_pool: Vec<ERCTransfer> = vec![];
 
@@ -438,6 +475,7 @@ impl Ronin {
 
                 self.database
                     .transactions
+                    .collection
                     .insert_many(&tx_pool, None)
                     .await
                     .ok();
@@ -465,10 +503,10 @@ impl Ronin {
             }
 
             self.database
-                .statistics
-                .update(current_block)
+                .settings
+                .set("last_block", current_block.to_string())
                 .await
-                .expect("Failed to write latest block to database!");
+                .expect("Failed to store last_block!");
 
             current_block = current_block + 1u64;
 

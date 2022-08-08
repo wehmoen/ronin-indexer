@@ -1,9 +1,12 @@
-use mongodb::{Client, ClientSession, Collection};
+use mongodb::options::IndexOptions;
+use mongodb::{bson::Document, Client, ClientSession, Collection};
 
-use crate::mongo::collections::statistic::StatisticProvider;
-use crate::mongo::collections::wallet::Wallet;
+use crate::mongo::collections::transaction::TransactionProvider;
 use crate::mongo::collections::{
-    erc_transfer::ERCTransfer, statistic::Statistic, transaction::Transaction,
+    erc_transfer::ERCTransfer,
+    settings::{Settings, SettingsProvider},
+    transaction::Transaction,
+    wallet::Wallet,
     wallet::WalletProvider,
 };
 
@@ -17,78 +20,110 @@ impl SessionBuilder {
     }
 }
 
+pub struct IndexModel {
+    pub model: Document,
+    pub options: IndexOptions,
+}
+
+pub trait Indexable {
+    fn index_model(&self) -> Vec<IndexModel>;
+}
+
 pub struct Database {
     pub wallets: WalletProvider,
-    pub transactions: Collection<Transaction>,
-    pub statistics: StatisticProvider,
-    pub erc_transfers: Collection<ERCTransfer>,
+    pub transactions: TransactionProvider,
+    pub settings: SettingsProvider,
+    pub erc_transfers: Collection<ERCTransfer>, //Todo: Create provider
     pub _client: Client,
 }
 
 pub mod collections {
+
     pub type Address = String;
     pub type TransactionHash = String;
     pub type Block = u64;
 
-    // Todo: Convert to a key:value storage and rename to settings
-    pub mod statistic {
+    pub mod settings {
         use mongodb::bson::doc;
         use mongodb::options::UpdateOptions;
         use mongodb::results::UpdateResult;
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
 
-        use crate::mongo::collections::Block;
+        use crate::mongo::{IndexModel, Indexable};
 
         #[derive(Serialize, Deserialize)]
-        pub struct Statistic {
-            last_block: Block,
+        pub struct Settings {
+            key: String,
+            pub value: String,
         }
 
-        pub struct StatisticProvider {
-            collection: Collection<Statistic>,
+        pub struct SettingsProvider {
+            pub collection: Collection<Settings>,
         }
-        impl StatisticProvider {
-            pub fn new(collection: Collection<Statistic>) -> StatisticProvider {
-                StatisticProvider { collection }
+
+        impl SettingsProvider {
+            pub fn new(collection: Collection<Settings>) -> SettingsProvider {
+                SettingsProvider { collection }
             }
 
-            pub async fn update(&self, block: Block) -> mongodb::error::Result<UpdateResult> {
-                let options = UpdateOptions::builder().upsert(Some(true)).build();
+            pub async fn get(&self, key: &'static str) -> Option<Settings> {
+                self.collection
+                    .find_one(
+                        doc! {
+                            "key": key
+                        },
+                        None,
+                    )
+                    .await
+                    .unwrap()
+            }
+
+            pub async fn set(
+                &self,
+                key: &'static str,
+                value: String,
+            ) -> mongodb::error::Result<UpdateResult> {
                 self.collection
                     .update_one(
-                        doc! {},
-                        {
-                            doc! {
-                                "$set": {
-                                    "last_block": block as i64
-                                }
+                        doc! {
+                            "key": key
+                        },
+                        doc! {
+                            "$set": {
+                                "key": key,
+                                "value": value
                             }
                         },
-                        options,
+                        UpdateOptions::builder().upsert(Some(true)).build(),
                     )
                     .await
             }
+        }
+        impl Indexable for SettingsProvider {
+            fn index_model(&self) -> Vec<IndexModel> {
+                let mut models: Vec<IndexModel> = vec![];
 
-            pub async fn last_block(&self) -> Option<Block> {
-                let db_result = self
-                    .collection
-                    .find_one(None, None)
-                    .await
-                    .expect("Failed to load statistics from database")
-                    .unwrap_or(Statistic { last_block: 0 });
+                models.push(IndexModel {
+                    model: doc! {
+                        "key": 1u32
+                    },
+                    options: Default::default(),
+                });
 
-                Some(db_result.last_block)
+                models
             }
         }
     }
     pub mod wallet {
         use mongodb::bson::{doc, Document};
+        use mongodb::options::IndexOptions;
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
 
         use crate::mongo::collections::transaction_pool::Pool;
         use crate::mongo::collections::{Address, Block, TransactionHash};
+        use crate::mongo::{IndexModel, Indexable};
 
         #[derive(Serialize, Deserialize, Clone)]
         pub struct WalletActivity {
@@ -104,7 +139,18 @@ pub mod collections {
 
         #[derive(Clone)]
         pub struct WalletProvider {
-            collection: Collection<Wallet>,
+            pub collection: Collection<Wallet>,
+        }
+
+        impl Indexable for WalletProvider {
+            fn index_model(&self) -> Vec<IndexModel> {
+                vec![IndexModel {
+                    model: doc! {
+                        "address": 1u32
+                    },
+                    options: IndexOptions::builder().unique(true).build(),
+                }]
+            }
         }
 
         impl WalletProvider {
@@ -137,9 +183,13 @@ pub mod collections {
         }
     }
     pub mod transaction {
+        use mongodb::bson::doc;
+        use mongodb::options::IndexOptions;
+        use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
 
         use crate::mongo::collections::{Address, Block, TransactionHash};
+        use crate::mongo::{IndexModel, Indexable};
 
         #[derive(Serialize, Deserialize)]
         pub struct Transaction {
@@ -148,6 +198,47 @@ pub mod collections {
             pub hash: TransactionHash,
             pub block: Block,
             pub timestamp: mongodb::bson::DateTime,
+        }
+
+        pub struct TransactionProvider {
+            pub(crate) collection: Collection<Transaction>,
+        }
+
+        impl TransactionProvider {
+            pub fn new(collection: Collection<Transaction>) -> TransactionProvider {
+                TransactionProvider { collection }
+            }
+        }
+
+        impl Indexable for TransactionProvider {
+            fn index_model(&self) -> Vec<IndexModel> {
+                vec![
+                    IndexModel {
+                        model: doc! {
+                            "hash": 1u32
+                        },
+                        options: IndexOptions::builder().unique(true).build(),
+                    },
+                    IndexModel {
+                        model: doc! {
+                            "block": 1u32
+                        },
+                        options: Default::default(),
+                    },
+                    IndexModel {
+                        model: doc! {
+                            "from": 1u32
+                        },
+                        options: Default::default(),
+                    },
+                    IndexModel {
+                        model: doc! {
+                            "to": 1u32
+                        },
+                        options: Default::default(),
+                    },
+                ]
+            }
         }
     }
     pub mod erc_transfer {
@@ -180,7 +271,6 @@ pub mod collections {
             }
         }
     }
-
     pub mod transaction_pool {
         use mongodb::bson::Document;
         use mongodb::error::Error;
@@ -267,16 +357,66 @@ pub async fn connect(hostname: String, database: String) -> Database {
 
     let db = client.database(database.as_str());
 
-    let wallet_collection = db.collection::<Wallet>("wallets");
-    let transaction_collection = db.collection::<Transaction>("transactions");
-    let statistic_collection = db.collection::<Statistic>("statistics");
+    let wallets = WalletProvider::new(db.collection::<Wallet>("wallets"));
+    let transactions = TransactionProvider::new(db.collection::<Transaction>("transactions"));
     let erc_transfer_collection = db.collection::<ERCTransfer>("erc_transfers");
+    let settings = SettingsProvider::new(db.collection::<Settings>("settings"));
 
-    Database {
-        wallets: WalletProvider::new(wallet_collection),
-        transactions: transaction_collection,
-        statistics: StatisticProvider::new(statistic_collection),
+    let database = Database {
+        wallets,
+        transactions,
+        settings,
         erc_transfers: erc_transfer_collection,
         _client: client,
+    };
+
+    database.create_indexes().await;
+
+    database
+}
+
+impl Database {
+    pub async fn create_indexes(&self) {
+        for model in self.settings.index_model() {
+            self.settings
+                .collection
+                .create_index(
+                    mongodb::IndexModel::builder()
+                        .keys(model.model)
+                        .options(model.options)
+                        .build(),
+                    None,
+                )
+                .await
+                .expect("Failed to create index!");
+        }
+
+        for model in self.wallets.index_model() {
+            self.wallets
+                .collection
+                .create_index(
+                    mongodb::IndexModel::builder()
+                        .keys(model.model)
+                        .options(model.options)
+                        .build(),
+                    None,
+                )
+                .await
+                .expect("Failed to create index!");
+        }
+
+        for model in self.transactions.index_model() {
+            self.transactions
+                .collection
+                .create_index(
+                    mongodb::IndexModel::builder()
+                        .keys(model.model)
+                        .options(model.options)
+                        .build(),
+                    None,
+                )
+                .await
+                .expect("Failed to create index!");
+        }
     }
 }
