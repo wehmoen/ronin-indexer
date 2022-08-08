@@ -1,4 +1,4 @@
-use mongodb::Collection;
+use mongodb::{Client, ClientSession, Collection};
 
 use crate::mongo::collections::statistic::StatisticProvider;
 use crate::mongo::collections::wallet::Wallet;
@@ -7,12 +7,23 @@ use crate::mongo::collections::{
     transaction::Transaction, wallet::WalletProvider,
 };
 
+pub struct SessionBuilder {}
+impl SessionBuilder {
+    pub async fn build(client: &Client) -> ClientSession {
+        client
+            .start_session(None)
+            .await
+            .expect("Failed to create session!")
+    }
+}
+
 pub struct Database {
     pub wallets: WalletProvider,
     pub transactions: Collection<Transaction>,
     pub statistics: StatisticProvider,
     pub erc_transfers: Collection<ERCTransfer>,
     pub axie_transfers: Collection<AxieTransfer>,
+    pub _client: Client,
 }
 
 pub mod collections {
@@ -73,12 +84,11 @@ pub mod collections {
         }
     }
     pub mod wallet {
-        use std::collections::HashMap;
-
-        use mongodb::bson::doc;
+        use mongodb::bson::{doc, Document};
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
 
+        use crate::mongo::collections::transaction_pool::Pool;
         use crate::mongo::collections::{Address, Block, TransactionHash};
 
         #[derive(Serialize, Deserialize, Clone)]
@@ -90,7 +100,6 @@ pub mod collections {
         #[derive(Serialize, Deserialize, Clone)]
         pub struct Wallet {
             address: Address,
-            first_seen: WalletActivity,
             last_seen: WalletActivity,
         }
 
@@ -100,73 +109,31 @@ pub mod collections {
         }
 
         impl WalletProvider {
-            pub async fn bulk(&self, map: HashMap<String, WalletActivity>) {
-                let map = map.into_iter();
-                for (address, activity) in map {
-                    self.update(address, activity.block, activity.transaction)
-                        .await
-                }
+            pub(crate) fn get_pool(&self) -> Pool<Wallet> {
+                Pool::new(self.collection.clone())
             }
 
-            //Todo: Compute the actual last seen tx for any address before invoking update. Otherwise there can be multiple updates per address per block.
-            pub async fn update(
+            pub fn update(
                 &self,
                 address: Address,
                 block: Block,
                 transaction: TransactionHash,
-            ) {
-                let wallet = self
-                    .collection
-                    .find_one(doc! {"address": &address}, None)
-                    .await
-                    .unwrap();
-
-                match wallet {
-                    Some(found_wallet) => {
-                        if (found_wallet.last_seen.block != block
-                            || found_wallet.last_seen.transaction != transaction)
-                            && found_wallet.last_seen.block <= block
-                        {
-                            self.collection
-                                .update_one(
-                                    doc! {"address": &address},
-                                    doc! {
-                                        "$set": {
-                                            "last_seen": {
-                                                "block": block as i64,
-                                                "transaction": transaction
-                                            }
-                                        }
-                                    },
-                                    None,
-                                )
-                                .await
-                                .ok();
-                            // .expect("Failed to update existing wallet in database!");
+            ) -> [Document; 2] {
+                [
+                    doc! {"address": &address},
+                    doc! {
+                        "$set": {
+                            "last_seen": {
+                                "block": block as i64,
+                                "transaction": transaction
+                            }
                         }
-                    }
-                    None => {
-                        let wallet = Wallet::new(address.clone(), block, transaction);
-                        self.collection.insert_one(wallet, None).await.ok();
-                    }
-                }
+                    },
+                ]
             }
 
             pub fn new(collection: Collection<Wallet>) -> WalletProvider {
                 WalletProvider { collection }
-            }
-        }
-
-        impl Wallet {
-            pub fn new(address: Address, block: Block, transaction: String) -> Wallet {
-                Wallet {
-                    address,
-                    first_seen: WalletActivity {
-                        block,
-                        transaction: transaction.clone(),
-                    },
-                    last_seen: WalletActivity { block, transaction },
-                }
             }
         }
     }
@@ -241,6 +208,84 @@ pub mod collections {
             }
         }
     }
+
+    pub mod transaction_pool {
+        use mongodb::bson::Document;
+        use mongodb::error::Error;
+        use mongodb::options::UpdateOptions;
+        use mongodb::Collection;
+        use serde::Serialize;
+
+        pub struct Pool<T> {
+            collection: Collection<T>,
+            updates: Vec<[Document; 2]>,
+        }
+
+        impl<T> Pool<T>
+        where
+            T: Serialize,
+        {
+            pub fn new(collection: Collection<T>) -> Self {
+                Pool {
+                    collection,
+                    updates: vec![],
+                }
+            }
+
+            fn has(&self, doc: Document) -> Option<usize> {
+                self.updates.clone().into_iter().position(|d| d[0].eq(&doc))
+            }
+
+            pub fn update(&mut self, update: [Document; 2]) {
+                let existing = self.has(update[0].clone());
+
+                match existing {
+                    None => {
+                        self.updates.push(update);
+                    }
+                    Some(index) => {
+                        self.updates.remove(index);
+                        self.updates.push(update);
+                    }
+                }
+            }
+
+            pub fn len(&self) -> usize {
+                self.updates.len()
+            }
+
+            pub async fn commit(
+                &mut self,
+                mut session: mongodb::ClientSession,
+                upsert: bool,
+            ) -> Result<&mut Pool<T>, Error> {
+                session.start_transaction(None).await?;
+
+                let options: UpdateOptions = match upsert {
+                    true => UpdateOptions::builder().upsert(Some(true)).build(),
+                    false => UpdateOptions::builder().build(),
+                };
+
+                for update in self.updates.as_slice() {
+                    let _ = self
+                        .collection
+                        .update_one_with_session(
+                            update[0].to_owned(),
+                            update[1].to_owned(),
+                            options.to_owned(),
+                            &mut session,
+                        )
+                        .await;
+                }
+
+                session.commit_transaction().await?;
+
+                self.updates.clear();
+
+                Ok(self)
+            }
+        }
+    }
 }
 
 pub async fn connect(hostname: String, database: String) -> Database {
@@ -262,5 +307,6 @@ pub async fn connect(hostname: String, database: String) -> Database {
         statistics: StatisticProvider::new(statistic_collection),
         erc_transfers: erc_transfer_collection,
         axie_transfers: axie_transfer_collection,
+        _client: client,
     }
 }
