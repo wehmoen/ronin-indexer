@@ -394,7 +394,7 @@ impl Database {
                     None,
                 )
                 .await
-                .expect("Failed to create index!");
+                .expect("Failed to create settings index!");
         }
 
         for model in self.wallets.index_model() {
@@ -408,7 +408,7 @@ impl Database {
                     None,
                 )
                 .await
-                .expect("Failed to create index!");
+                .expect("Failed to create wallet index!");
         }
 
         for model in self.transactions.index_model() {
@@ -422,7 +422,21 @@ impl Database {
                     None,
                 )
                 .await
-                .expect("Failed to create index!");
+                .expect("Failed to create transaction index!");
+        }
+
+        for model in self.erc_transfers.index_model() {
+            self.erc_transfers
+                .collection
+                .create_index(
+                    mongodb::IndexModel::builder()
+                        .keys(model.model)
+                        .options(model.options)
+                        .build(),
+                    None,
+                )
+                .await
+                .expect("Failed to create erc_transfer index!");
         }
     }
 }
