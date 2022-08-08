@@ -372,14 +372,21 @@ pub mod collections {
                     };
 
                     for update in self.updates.as_slice() {
-                        self.collection
+                        match self
+                            .collection
                             .update_one_with_session(
                                 update[0].to_owned(),
                                 update[1].to_owned(),
                                 options.to_owned(),
                                 &mut session,
                             )
-                            .await?;
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(error) => {
+                                println!("Failed to upsert {:?} with error {:?}", update, error);
+                            }
+                        }
                     }
                 }
 
