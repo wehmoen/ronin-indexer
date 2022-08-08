@@ -191,6 +191,10 @@ impl Ronin {
         map
     }
 
+    fn to_string<T: serde::Serialize>(&self, request: &T) -> String {
+        web3::helpers::to_string(request).replace("\"", "")
+    }
+
     pub async fn new(hostname: String, database: Database) -> Ronin {
         let parsed = Url::parse(&hostname)
             .expect(format!("Failed to parse web3 hostname: {}", &hostname).as_str());
@@ -318,21 +322,21 @@ impl Ronin {
                 }
 
                 let mut tx_pool: Vec<Transaction> = vec![];
-                let mut erc_transfer_pool: Vec<ERCTransfer> = vec![];
+                let mut erc_pool: Pool<ERCTransfer> = self.database.erc_transfers.get_pool();
 
                 for tx in block.transactions {
-                    let tx_from = web3::helpers::to_string(&tx.from).replace("\"", "");
-                    let tx_to = web3::helpers::to_string(&tx.to).replace("\"", "");
-                    let tx_hash = web3::helpers::to_string(&tx.hash).replace("\"", "");
+                    let tx_from = self.to_string(&tx.from);
+                    let tx_to = self.to_string(&tx.to);
+                    let tx_hash = self.to_string(&tx.hash);
 
                     wallet_pool.update(self.database.wallets.update(
-                        tx_from,
+                        tx_from.clone(),
                         block_number,
                         tx_hash.clone(),
                     ));
 
                     wallet_pool.update(self.database.wallets.update(
-                        tx_to,
+                        tx_to.clone(),
                         block_number,
                         tx_hash.clone(),
                     ));
@@ -347,10 +351,12 @@ impl Ronin {
 
                     if receipt.logs.len() > 0 {
                         for log in receipt.logs {
-                            match log.topics.clone().into_iter().find(|t| {
-                                web3::helpers::to_string(t).replace("\"", "").as_str()
-                                    == ERC_TRANSFER_TOPIC
-                            }) {
+                            match log
+                                .topics
+                                .clone()
+                                .into_iter()
+                                .find(|t| self.to_string(t).as_str() == ERC_TRANSFER_TOPIC)
+                            {
                                 None => {}
                                 Some(_) => {
                                     let raw_log = RawLog {
@@ -358,146 +364,59 @@ impl Ronin {
                                         data: log.data.0,
                                     };
 
-                                    let contract_address =
-                                        web3::helpers::to_string(&log.address).replace("\"", "");
+                                    let contract_address = self.to_string(&log.address);
 
                                     match contracts.get(&contract_address.as_str()) {
                                         None => continue,
-                                        Some(contract) => match contract.erc {
-                                            ContractType::ERC20 => {
-                                                let event_data = transfer_events
-                                                    .get(&ContractType::ERC20)
-                                                    .unwrap()
-                                                    .clone()
-                                                    .parse_log(raw_log)
-                                                    .expect("Failed to parsed transaction log!");
+                                        Some(contract) => {
+                                            let event_data = transfer_events
+                                                .get(&contract.erc)
+                                                .unwrap()
+                                                .clone()
+                                                .parse_log(raw_log)
+                                                .expect("Failed to parsed transaction log!");
 
-                                                let from = web3::helpers::to_string(
-                                                    &event_data.params[0].value.to_string(),
-                                                )
-                                                .replace("\"", "");
-                                                let from = f!("0x{from}");
+                                            let from = self
+                                                .to_string(&event_data.params[0].value.to_string());
+                                            let from = f!("0x{from}");
 
-                                                let to = web3::helpers::to_string(
-                                                    &event_data.params[1].value.to_string(),
-                                                )
-                                                .replace("\"", "");
-                                                let to = f!("0x{to}");
+                                            let to = self
+                                                .to_string(&event_data.params[1].value.to_string());
+                                            let to = f!("0x{to}");
 
-                                                let signature = ERCTransfer::get_transfer_id(
-                                                    web3::helpers::to_string(&log.transaction_hash)
-                                                        .replace("\"", ""),
-                                                    web3::helpers::to_string(&log.log_index)
-                                                        .replace("\"", ""),
-                                                );
+                                            let signature = ERCTransfer::get_transfer_id(
+                                                self.to_string(&log.transaction_hash),
+                                                self.to_string(&log.log_index),
+                                            );
 
-                                                match erc_transfer_pool
-                                                    .clone()
-                                                    .into_iter()
-                                                    .find(|t| t.log_id == signature)
-                                                {
-                                                    None => erc_transfer_pool.push(ERCTransfer {
-                                                        from: from.clone(),
-                                                        to: to.clone(),
-                                                        token: contract_address,
-                                                        value_or_token_id:
-                                                            web3::helpers::to_string(
-                                                                &event_data.params[2]
-                                                                    .value
-                                                                    .to_string(),
-                                                            )
-                                                            .replace("\"", ""),
-                                                        block: block_number,
-                                                        transaction_id: web3::helpers::to_string(
-                                                            &log.transaction_hash,
-                                                        )
-                                                        .replace("\"", ""),
-                                                        erc: ContractType::ERC20,
-                                                        log_index: web3::helpers::to_string(
-                                                            &log.log_index,
-                                                        )
-                                                        .replace("\"", ""),
-                                                        log_id: signature,
-                                                    }),
-                                                    Some(_) => continue,
-                                                }
-                                            }
-                                            ContractType::ERC721 => {
-                                                let event_data = transfer_events
-                                                    .get(&ContractType::ERC721)
-                                                    .unwrap()
-                                                    .clone()
-                                                    .parse_log(raw_log)
-                                                    .expect("Failed to parsed transaction log!");
-
-                                                let from = web3::helpers::to_string(
-                                                    &event_data.params[0].value.to_string(),
-                                                )
-                                                .replace("\"", "");
-                                                let from = f!("0x{from}");
-
-                                                let to = web3::helpers::to_string(
-                                                    &event_data.params[1].value.to_string(),
-                                                )
-                                                .replace("\"", "");
-                                                let to = f!("0x{to}");
-
-                                                let signature = ERCTransfer::get_transfer_id(
-                                                    web3::helpers::to_string(&log.transaction_hash)
-                                                        .replace("\"", ""),
-                                                    web3::helpers::to_string(&log.log_index)
-                                                        .replace("\"", ""),
-                                                );
-
-                                                match erc_transfer_pool
-                                                    .clone()
-                                                    .into_iter()
-                                                    .find(|t| t.log_id == signature)
-                                                {
-                                                    None => erc_transfer_pool.push(ERCTransfer {
-                                                        from: from.clone(),
-                                                        to: to.clone(),
-                                                        token: contract_address.clone(),
-                                                        value_or_token_id:
-                                                            web3::helpers::to_string(
-                                                                &event_data.params[2]
-                                                                    .value
-                                                                    .to_string(),
-                                                            )
-                                                            .replace("\"", ""),
-                                                        block: block_number,
-                                                        transaction_id: web3::helpers::to_string(
-                                                            &log.transaction_hash,
-                                                        )
-                                                        .replace("\"", ""),
-                                                        erc: ContractType::ERC721,
-                                                        log_index: web3::helpers::to_string(
-                                                            &log.log_index,
-                                                        )
-                                                        .replace("\"", ""),
-                                                        log_id: signature,
-                                                    }),
-                                                    Some(_) => continue,
-                                                }
-                                            }
-                                            ContractType::Unknown => continue,
-                                        },
+                                            erc_pool.insert(ERCTransfer {
+                                                from: from.clone(),
+                                                to: to.clone(),
+                                                token: contract_address.to_owned(),
+                                                value_or_token_id: self.to_string(
+                                                    &event_data.params[2].value.to_string(),
+                                                ),
+                                                block: block_number,
+                                                transaction_id: self
+                                                    .to_string(&log.transaction_hash),
+                                                erc: contract.erc.to_owned(),
+                                                log_index: self.to_string(&log.log_index),
+                                                log_id: signature.clone(),
+                                            });
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
-                    let from = web3::helpers::to_string(&tx.from).replace("\"", "");
-                    let from = f!("0x{from}");
-
-                    let to = web3::helpers::to_string(&tx.to).replace("\"", "");
-                    let to = f!("0x{to}");
+                    let from = f!("0x{tx_from}");
+                    let to = f!("0x{tx_to}");
 
                     tx_pool.push(Transaction {
                         from: from.clone(),
                         to: to.clone(),
-                        hash: web3::helpers::to_string(&tx.hash).replace("\"", ""),
+                        hash: self.to_string(&tx.hash),
                         block: current_block,
                         timestamp: timestamp,
                     });
@@ -509,18 +428,17 @@ impl Ronin {
                     .insert_many(&tx_pool, None)
                     .await
                     .ok();
-                self.database
-                    .erc_transfers
-                    .collection
-                    .insert_many(&erc_transfer_pool, None)
-                    .await
-                    .ok();
 
+                let erc_insert_num = erc_pool.len();
                 let wallet_update_num = wallet_pool.len();
-                let session = SessionBuilder::build(&self.database._client).await;
+
+                erc_pool
+                    .commit(SessionBuilder::build(&self.database._client).await, true)
+                    .await
+                    .expect("Failed to insert erc transfers");
 
                 wallet_pool
-                    .commit(session, true)
+                    .commit(SessionBuilder::build(&self.database._client).await, true)
                     .await
                     .expect("Failed to update wallets");
 
@@ -528,7 +446,7 @@ impl Ronin {
                     "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tWallet Updates: {:>5}",
                     &current_block,
                     num_txs,
-                    erc_transfer_pool.len(),
+                    erc_insert_num,
                     wallet_update_num
                 );
             } else {

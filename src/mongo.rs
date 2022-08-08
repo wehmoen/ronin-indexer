@@ -129,13 +129,13 @@ pub mod collections {
         use crate::mongo::collections::{Address, Block, TransactionHash};
         use crate::mongo::{index_model, IndexModel, Indexable};
 
-        #[derive(Serialize, Deserialize, Clone)]
+        #[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
         pub struct WalletActivity {
             pub block: Block,
             pub transaction: TransactionHash,
         }
 
-        #[derive(Serialize, Deserialize, Clone)]
+        #[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
         pub struct Wallet {
             address: Address,
             last_seen: WalletActivity,
@@ -226,11 +226,12 @@ pub mod collections {
         use sha2::digest::Update;
         use sha2::{Digest, Sha256};
 
+        use crate::mongo::collections::transaction_pool::Pool;
         use crate::mongo::collections::{Address, Block};
         use crate::mongo::{index_model, IndexModel, Indexable};
         use crate::ronin::ContractType;
 
-        #[derive(Serialize, Deserialize, Debug, Clone)]
+        #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
         pub struct ERCTransfer {
             pub from: Address,
             pub to: Address,
@@ -267,6 +268,10 @@ pub mod collections {
             pub fn new(collection: Collection<ERCTransfer>) -> ErcTransferProvider {
                 ErcTransferProvider { collection }
             }
+
+            pub(crate) fn get_pool(&self) -> Pool<ERCTransfer> {
+                Pool::new(self.collection.clone())
+            }
         }
 
         impl ERCTransfer {
@@ -288,25 +293,45 @@ pub mod collections {
         pub struct Pool<T> {
             collection: Collection<T>,
             updates: Vec<[Document; 2]>,
+            inserts: Vec<T>,
         }
 
         impl<T> Pool<T>
         where
-            T: Serialize,
+            T: Serialize + Clone + Eq + PartialEq,
         {
             pub fn new(collection: Collection<T>) -> Self {
                 Pool {
                     collection,
                     updates: vec![],
+                    inserts: vec![],
                 }
             }
 
-            fn has(&self, doc: Document) -> Option<usize> {
+            fn has_update(&self, doc: Document) -> Option<usize> {
                 self.updates.clone().into_iter().position(|d| d[0].eq(&doc))
             }
 
+            fn has_insert(&self, doc: T) -> Option<usize> {
+                self.inserts.clone().into_iter().position(|d| d.eq(&doc))
+            }
+
+            pub fn insert(&mut self, insert: T) {
+                let existing = self.has_insert(insert.clone());
+
+                match existing {
+                    None => {
+                        self.inserts.push(insert);
+                    }
+                    Some(index) => {
+                        self.inserts.remove(index);
+                        self.inserts.push(insert);
+                    }
+                }
+            }
+
             pub fn update(&mut self, update: [Document; 2]) {
-                let existing = self.has(update[0].clone());
+                let existing = self.has_update(update[0].clone());
 
                 match existing {
                     None => {
@@ -320,7 +345,7 @@ pub mod collections {
             }
 
             pub fn len(&self) -> usize {
-                self.updates.len()
+                self.updates.len() + self.inserts.len()
             }
 
             pub async fn commit(
@@ -330,21 +355,28 @@ pub mod collections {
             ) -> Result<&mut Pool<T>, Error> {
                 session.start_transaction(None).await?;
 
-                let options: UpdateOptions = match upsert {
-                    true => UpdateOptions::builder().upsert(Some(true)).build(),
-                    false => UpdateOptions::builder().build(),
-                };
+                if self.inserts.len() > 0 {
+                    self.collection
+                        .insert_many_with_session(self.inserts.clone(), None, &mut session)
+                        .await?;
+                }
 
-                for update in self.updates.as_slice() {
-                    let _ = self
-                        .collection
-                        .update_one_with_session(
-                            update[0].to_owned(),
-                            update[1].to_owned(),
-                            options.to_owned(),
-                            &mut session,
-                        )
-                        .await;
+                if self.updates.len() > 0 {
+                    let options: UpdateOptions = match upsert {
+                        true => UpdateOptions::builder().upsert(Some(true)).build(),
+                        false => UpdateOptions::builder().build(),
+                    };
+
+                    for update in self.updates.as_slice() {
+                        self.collection
+                            .update_one_with_session(
+                                update[0].to_owned(),
+                                update[1].to_owned(),
+                                options.to_owned(),
+                                &mut session,
+                            )
+                            .await?;
+                    }
                 }
 
                 session.commit_transaction().await?;
