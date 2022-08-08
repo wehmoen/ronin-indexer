@@ -217,7 +217,7 @@ impl Ronin {
         }
     }
 
-    pub async fn stream(&self, offset: u64, replay: bool) {
+    pub async fn stream(&self, offset: u64, replay: bool, empty_logs: bool) {
         if replay {
             println!("W A R N I N G");
             println!("About to drop ANY data stored in the database for this app!");
@@ -531,6 +531,16 @@ impl Ronin {
                     erc_transfer_pool.len(),
                     wallet_update_num
                 );
+            } else {
+                if empty_logs {
+                    println!(
+                        "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tWallet Updates: {:>5}",
+                        &current_block,
+                        0,
+                        0,
+                        0
+                    );
+                }
             }
 
             self.database

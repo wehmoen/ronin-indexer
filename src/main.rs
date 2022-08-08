@@ -13,5 +13,5 @@ async fn main() {
     let db = mongo::connect(args.db_uri, args.db_name).await;
     let ronin = Ronin::new(args.web3_hostname, db).await;
 
-    ronin.stream(50, args.replay).await;
+    ronin.stream(50, args.replay, args.empty_logs).await;
 }

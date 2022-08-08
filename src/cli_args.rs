@@ -22,6 +22,9 @@ pub struct Args {
     /// Replay - Drops the entire database and starts reindexing the chain from block 0
     #[clap(short = 'r', long, value_parser, default_value_t = false)]
     pub replay: bool,
+    /// Show logs for empty blocks
+    #[clap(short = 'l', long, value_parser, default_value_t = false)]
+    pub empty_logs: bool,
 }
 
 pub fn parse() -> Args {
