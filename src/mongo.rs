@@ -286,7 +286,7 @@ pub mod collections {
     pub mod transaction_pool {
         use mongodb::bson::Document;
         use mongodb::error::Error;
-        use mongodb::options::UpdateOptions;
+        use mongodb::options::{InsertManyOptions, UpdateOptions};
         use mongodb::Collection;
         use serde::Serialize;
 
@@ -357,7 +357,11 @@ pub mod collections {
 
                 if self.inserts.len() > 0 {
                     self.collection
-                        .insert_many_with_session(self.inserts.clone(), None, &mut session)
+                        .insert_many_with_session(
+                            self.inserts.clone(),
+                            InsertManyOptions::builder().ordered(false).build(),
+                            &mut session,
+                        )
                         .await?;
                 }
 
