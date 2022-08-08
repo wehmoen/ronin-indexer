@@ -363,7 +363,8 @@ pub mod collections {
                             InsertManyOptions::builder().ordered(false).build(),
                             &mut session,
                         )
-                        .await?;
+                        .await
+                        .ok(); // Todo: figure out a way how to handle errors without inserting docs one by one
                 }
 
                 if self.updates.len() > 0 {
