@@ -383,60 +383,72 @@ pub async fn connect(hostname: String, database: String) -> Database {
 
 impl Database {
     pub async fn create_indexes(&self) {
-        for model in self.settings.index_model() {
+        let create = match self.settings.get("setup").await {
+            None => true,
+            Some(_) => false,
+        };
+
+        if (create) {
+            for model in self.settings.index_model() {
+                self.settings
+                    .collection
+                    .create_index(
+                        mongodb::IndexModel::builder()
+                            .keys(model.model)
+                            .options(model.options)
+                            .build(),
+                        None,
+                    )
+                    .await
+                    .expect("Failed to create settings index!");
+            }
+
+            for model in self.wallets.index_model() {
+                self.wallets
+                    .collection
+                    .create_index(
+                        mongodb::IndexModel::builder()
+                            .keys(model.model)
+                            .options(model.options)
+                            .build(),
+                        None,
+                    )
+                    .await
+                    .expect("Failed to create wallet index!");
+            }
+
+            for model in self.transactions.index_model() {
+                self.transactions
+                    .collection
+                    .create_index(
+                        mongodb::IndexModel::builder()
+                            .keys(model.model)
+                            .options(model.options)
+                            .build(),
+                        None,
+                    )
+                    .await
+                    .expect("Failed to create transaction index!");
+            }
+
+            for model in self.erc_transfers.index_model() {
+                self.erc_transfers
+                    .collection
+                    .create_index(
+                        mongodb::IndexModel::builder()
+                            .keys(model.model)
+                            .options(model.options)
+                            .build(),
+                        None,
+                    )
+                    .await
+                    .expect("Failed to create erc_transfer index!");
+            }
+
             self.settings
-                .collection
-                .create_index(
-                    mongodb::IndexModel::builder()
-                        .keys(model.model)
-                        .options(model.options)
-                        .build(),
-                    None,
-                )
+                .set("setup", "1".to_string())
                 .await
-                .expect("Failed to create settings index!");
-        }
-
-        for model in self.wallets.index_model() {
-            self.wallets
-                .collection
-                .create_index(
-                    mongodb::IndexModel::builder()
-                        .keys(model.model)
-                        .options(model.options)
-                        .build(),
-                    None,
-                )
-                .await
-                .expect("Failed to create wallet index!");
-        }
-
-        for model in self.transactions.index_model() {
-            self.transactions
-                .collection
-                .create_index(
-                    mongodb::IndexModel::builder()
-                        .keys(model.model)
-                        .options(model.options)
-                        .build(),
-                    None,
-                )
-                .await
-                .expect("Failed to create transaction index!");
-        }
-
-        for model in self.erc_transfers.index_model() {
-            self.erc_transfers
-                .collection
-                .create_index(
-                    mongodb::IndexModel::builder()
-                        .keys(model.model)
-                        .options(model.options)
-                        .build(),
-                    None,
-                )
-                .await
-                .expect("Failed to create erc_transfer index!");
+                .expect("Failed to complete setup!");
         }
     }
 }
