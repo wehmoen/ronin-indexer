@@ -351,17 +351,18 @@ pub mod collections {
 
             pub async fn commit(
                 &mut self,
-                mut session: mongodb::ClientSession,
+                mut _session: mongodb::ClientSession,
                 upsert: bool,
             ) -> Result<&mut Pool<T>, Error> {
-                session.start_transaction(None).await?;
+                // session.start_transaction(None).await?;
 
                 if self.inserts.len() > 0 {
                     self.collection
-                        .insert_many_with_session(
+                        // .insert_many_with_session(
+                        .insert_many(
                             &self.inserts,
                             InsertManyOptions::builder().ordered(false).build(),
-                            &mut session,
+                            // &mut session,
                         )
                         .await
                         .ok(); // Todo: figure out a way how to handle errors without inserting docs one by one
@@ -376,11 +377,12 @@ pub mod collections {
                     for update in self.updates.as_slice() {
                         match self
                             .collection
-                            .update_one_with_session(
+                            // .update_one_with_session(
+                            .update_one(
                                 update[0].to_owned(),
                                 update[1].to_owned(),
                                 options.to_owned(),
-                                &mut session,
+                                // &mut session,
                             )
                             .await
                         {
@@ -392,7 +394,7 @@ pub mod collections {
                     }
                 }
 
-                session.commit_transaction().await?;
+                // session.commit_transaction().await?;
 
                 self.updates.clear();
                 self.inserts.clear();
