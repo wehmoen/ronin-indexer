@@ -193,25 +193,25 @@ impl Ronin {
     }
 
     fn to_string<T: serde::Serialize>(&self, request: &T) -> String {
-        web3::helpers::to_string(request).replace("\"", "")
+        web3::helpers::to_string(request).replace('\"', "")
     }
 
     pub async fn new(hostname: &str, database: Database) -> Ronin {
-        let parsed = Url::parse(&hostname)
-            .expect(format!("Failed to parse web3 hostname: {}", &hostname).as_str());
+        let parsed = Url::parse(hostname)
+            .unwrap_or_else(|_| panic!("Failed to parse web3 hostname: {}", &hostname));
         let provider = match parsed.scheme() {
             "ws" => {
-                let provider = WebSocket::new(&hostname)
+                let provider = WebSocket::new(hostname)
                     .await
                     .expect("Failed to connect to websocket provider!");
                 Either::Left(provider)
             }
             "http" => {
-                Either::Right(Http::new(&hostname).expect("Failed to connect to http provider!"))
+                Either::Right(Http::new(hostname).expect("Failed to connect to http provider!"))
             }
             "https" => {
                 println!("[WARN] Consider using http as protocol for better performance!");
-                Either::Right(Http::new(&hostname).expect("Failed to connect to http provider!"))
+                Either::Right(Http::new(hostname).expect("Failed to connect to http provider!"))
             }
             _ => panic!("Invalid provider type"),
         };
@@ -298,8 +298,8 @@ impl Ronin {
                 .eth()
                 .block_with_txs(BlockId::Number(BlockNumber::from(current_block as u64)))
                 .await
-                .expect(format!("Failed to load block {} from provider!", current_block).as_str())
-                .expect(format!("Failed to unwrap block {} from result!", current_block).as_str());
+                .unwrap_or_else(|_| panic!("Failed to load block {} from provider!", current_block))
+                .unwrap_or_else(|| panic!("Failed to unwrap block {} from result!", current_block));
 
             let block_number: u64 = block.number.unwrap().as_u64();
             let timestamp = block.timestamp.as_u64() * 1000;
@@ -350,7 +350,7 @@ impl Ronin {
                         .expect("Failed to retrieve transaction receipt!")
                         .expect("Failed to unwrap transaction receipt!");
 
-                    if receipt.logs.len() > 0 {
+                    if !receipt.logs.is_empty() {
                         for log in receipt.logs {
                             match log
                                 .topics
@@ -392,7 +392,7 @@ impl Ronin {
 
                                             erc_pool.insert(ERCTransfer {
                                                 from,
-                                                to: to,
+                                                to,
                                                 token: contract_address.to_owned(),
                                                 value_or_token_id: self.to_string(
                                                     &event_data.params[2].value.to_string(),
@@ -419,7 +419,7 @@ impl Ronin {
                         to,
                         hash: self.to_string(&tx.hash),
                         block: current_block,
-                        timestamp: timestamp,
+                        timestamp,
                     });
                 }
 
@@ -450,16 +450,14 @@ impl Ronin {
                     erc_insert_num,
                     wallet_update_num
                 );
-            } else {
-                if empty_logs {
-                    println!(
-                        "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tWallet Updates: {:>5}",
-                        &current_block,
-                        0,
-                        0,
-                        0
-                    );
-                }
+            } else if empty_logs {
+                println!(
+                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tWallet Updates: {:>5}",
+                    &current_block,
+                    0,
+                    0,
+                    0
+                );
             }
 
             self.database

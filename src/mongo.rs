@@ -310,11 +310,11 @@ pub mod collections {
             }
 
             fn has_update(&self, doc: &Document) -> Option<usize> {
-                self.updates.iter().position(|d| d[0].eq(&doc))
+                self.updates.iter().position(|d| d[0].eq(doc))
             }
 
             fn has_insert(&self, doc: &T) -> Option<usize> {
-                self.inserts.iter().position(|d| d.eq(&doc))
+                self.inserts.iter().position(|d| d.eq(doc))
             }
 
             pub fn insert(&mut self, insert: T) {
@@ -356,7 +356,7 @@ pub mod collections {
             ) -> Result<&mut Pool<T>, Error> {
                 // session.start_transaction(None).await?;
 
-                if self.inserts.len() > 0 {
+                if !self.inserts.is_empty() {
                     self.collection
                         // .insert_many_with_session(
                         .insert_many(
@@ -368,7 +368,7 @@ pub mod collections {
                         .ok(); // Todo: figure out a way how to handle errors without inserting docs one by one
                 }
 
-                if self.updates.len() > 0 {
+                if !self.updates.is_empty() {
                     let options: UpdateOptions = match upsert {
                         true => UpdateOptions::builder().upsert(Some(true)).build(),
                         false => UpdateOptions::builder().build(),
@@ -408,7 +408,7 @@ pub mod collections {
 pub async fn connect(hostname: &str, database: &str) -> Database {
     let client = Client::with_uri_str(&hostname)
         .await
-        .expect(format!("Failed to connect to mongodb at {}", &hostname).as_str());
+        .unwrap_or_else(|_| panic!("Failed to connect to mongodb at {}", &hostname));
 
     let db = client.database(database);
 
