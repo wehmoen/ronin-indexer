@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::thread;
+use std::time::Duration;
 
 use mongodb::bson::{doc, DateTime};
 use serde::{Deserialize, Serialize};
@@ -216,6 +218,38 @@ impl Ronin {
     }
 
     pub async fn stream(&self, offset: u64, replay: bool) {
+        if replay {
+            println!("W A R N I N G");
+            println!("About to drop ANY data stored in the database for this app!");
+            println!("Waiting 15 seconds...");
+            thread::sleep(Duration::new(15, 0));
+            self.database
+                .settings
+                .collection
+                .drop(None)
+                .await
+                .expect("Failed to drop settings collection");
+            self.database
+                .wallets
+                .collection
+                .drop(None)
+                .await
+                .expect("Failed to drop wallets collection");
+            self.database
+                .transactions
+                .collection
+                .drop(None)
+                .await
+                .expect("Failed to drop transactions collection");
+            self.database
+                .erc_transfers
+                .collection
+                .drop(None)
+                .await
+                .expect("Failed to drop erc_transfers collection");
+            self.database.create_indexes().await;
+        }
+
         let contracts = Ronin::contract_list();
         let transfer_events = Ronin::transfer_events();
 
@@ -228,15 +262,10 @@ impl Ronin {
 
         let stream_stop_block: Block = chain_head_block.as_u64() - offset;
 
-        let start: Block = match replay {
-            true => 1,
-            false => {
-                let last_db_block = self.database.settings.get("last_block").await;
-                match last_db_block {
-                    None => 1,
-                    Some(settings) => settings.value.parse::<u64>().unwrap(),
-                }
-            }
+        let start = self.database.settings.get("last_block").await;
+        let start: Block = match start {
+            None => 1,
+            Some(settings) => settings.value.parse::<u64>().unwrap(),
         };
 
         let mut largest_block_by_tx_num: LargestBlock =

@@ -2,6 +2,7 @@
 extern crate fstrings;
 
 use crate::ronin::Ronin;
+
 mod cli_args;
 mod mongo;
 mod ronin;

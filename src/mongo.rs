@@ -49,6 +49,7 @@ pub struct Database {
     pub settings: SettingsProvider,
     pub erc_transfers: ErcTransferProvider,
     pub _client: Client,
+    pub _database: mongodb::Database,
 }
 
 pub mod collections {
@@ -374,6 +375,7 @@ pub async fn connect(hostname: String, database: String) -> Database {
         settings,
         erc_transfers,
         _client: client,
+        _database: db,
     };
 
     database.create_indexes().await;
@@ -388,7 +390,7 @@ impl Database {
             Some(_) => false,
         };
 
-        if (create) {
+        if create {
             for model in self.settings.index_model() {
                 self.settings
                     .collection
