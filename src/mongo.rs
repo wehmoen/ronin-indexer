@@ -1,4 +1,3 @@
-use mongodb::bson::doc;
 use mongodb::options::IndexOptions;
 use mongodb::{bson::Document, Client, ClientSession};
 
@@ -32,10 +31,12 @@ pub trait Indexable {
 }
 
 fn index_model(key: &'static str, unique: bool) -> IndexModel {
+    let mut doc = Document::new();
+    let doc = doc.insert(key, 1u32).unwrap();
+    let doc = doc.as_document().unwrap();
+
     IndexModel {
-        model: doc! {
-            key: 1u32
-        },
+        model: doc.to_owned(),
         options: match unique {
             true => IndexOptions::builder().unique(true).build(),
             false => Default::default(),
