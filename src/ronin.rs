@@ -8,7 +8,6 @@ use web3::transports::{Either, Http, WebSocket};
 use web3::types::{BlockId, BlockNumber};
 use web3::Web3;
 
-use crate::mongo::collections::axie_transfer::AxieTransfer;
 use crate::mongo::collections::transaction_pool::Pool;
 use crate::mongo::collections::wallet::Wallet;
 use crate::mongo::collections::{erc_transfer::ERCTransfer, Block};
@@ -234,7 +233,6 @@ impl Ronin {
         println!("[INFO] Streaming from {} to {}", &start, &stream_stop_block);
 
         let mut current_block: Block = start.clone();
-
         let mut wallet_pool: Pool<Wallet> = self.database.wallets.get_pool();
 
         loop {
@@ -254,7 +252,6 @@ impl Ronin {
             if num_txs > 0 {
                 let mut tx_pool: Vec<crate::mongo::collections::transaction::Transaction> = vec![];
                 let mut erc_transfer_pool: Vec<ERCTransfer> = vec![];
-                let mut axie_transfer_pool: Vec<AxieTransfer> = vec![];
 
                 for tx in block.transactions {
                     let tx_from = web3::helpers::to_string(&tx.from).replace("\"", "");
@@ -320,18 +317,6 @@ impl Ronin {
                                                 .replace("\"", "");
                                                 let to = f!("0x{to}");
 
-                                                wallet_pool.update(self.database.wallets.update(
-                                                    from.clone(),
-                                                    block_number,
-                                                    tx_hash.clone(),
-                                                ));
-
-                                                wallet_pool.update(self.database.wallets.update(
-                                                    to.clone(),
-                                                    block_number,
-                                                    tx_hash.clone(),
-                                                ));
-
                                                 let signature = ERCTransfer::get_transfer_id(
                                                     web3::helpers::to_string(&log.transaction_hash)
                                                         .replace("\"", ""),
@@ -390,18 +375,6 @@ impl Ronin {
                                                 .replace("\"", "");
                                                 let to = f!("0x{to}");
 
-                                                wallet_pool.update(self.database.wallets.update(
-                                                    from.clone(),
-                                                    block_number,
-                                                    tx_hash.clone(),
-                                                ));
-
-                                                wallet_pool.update(self.database.wallets.update(
-                                                    to.clone(),
-                                                    block_number,
-                                                    tx_hash.clone(),
-                                                ));
-
                                                 let signature = ERCTransfer::get_transfer_id(
                                                     web3::helpers::to_string(&log.transaction_hash)
                                                         .replace("\"", ""),
@@ -439,29 +412,6 @@ impl Ronin {
                                                     }),
                                                     Some(_) => continue,
                                                 }
-
-                                                if contract.name == "AXIE" {
-                                                    let axie = event_data.params[2]
-                                                        .clone()
-                                                        .value
-                                                        .into_uint()
-                                                        .unwrap()
-                                                        .as_u32();
-
-                                                    axie_transfer_pool.push(AxieTransfer {
-                                                        from: from.clone(),
-                                                        to: to.clone(),
-                                                        axie: axie,
-                                                        block: block_number,
-                                                        created_at: timestamp,
-                                                        transfer_id: AxieTransfer::get_transfer_id(
-                                                            from.as_str(),
-                                                            to.as_str(),
-                                                            &axie,
-                                                            &block_number,
-                                                        ),
-                                                    })
-                                                }
                                             }
                                             ContractType::Unknown => continue,
                                         },
@@ -492,19 +442,13 @@ impl Ronin {
                     .await
                     .ok();
                 self.database
-                    .axie_transfers
-                    .insert_many(&axie_transfer_pool, None)
-                    .await
-                    .ok();
-                self.database
                     .erc_transfers
                     .insert_many(&erc_transfer_pool, None)
                     .await
                     .ok();
 
-                let session = SessionBuilder::build(&self.database._client).await;
-
                 let wallet_update_num = wallet_pool.len();
+                let session = SessionBuilder::build(&self.database._client).await;
 
                 wallet_pool
                     .commit(session, true)
@@ -512,11 +456,10 @@ impl Ronin {
                     .expect("Failed to update wallets");
 
                 println!(
-                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tAxie Transfers: {:>5}\tWallet Updates: {:>5}",
+                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tWallet Updates: {:>5}",
                     &current_block,
                     num_txs,
                     erc_transfer_pool.len(),
-                    axie_transfer_pool.len(),
                     wallet_update_num
                 );
             }

@@ -3,8 +3,8 @@ use mongodb::{Client, ClientSession, Collection};
 use crate::mongo::collections::statistic::StatisticProvider;
 use crate::mongo::collections::wallet::Wallet;
 use crate::mongo::collections::{
-    axie_transfer::AxieTransfer, erc_transfer::ERCTransfer, statistic::Statistic,
-    transaction::Transaction, wallet::WalletProvider,
+    erc_transfer::ERCTransfer, statistic::Statistic, transaction::Transaction,
+    wallet::WalletProvider,
 };
 
 pub struct SessionBuilder {}
@@ -22,7 +22,6 @@ pub struct Database {
     pub transactions: Collection<Transaction>,
     pub statistics: StatisticProvider,
     pub erc_transfers: Collection<ERCTransfer>,
-    pub axie_transfers: Collection<AxieTransfer>,
     pub _client: Client,
 }
 
@@ -181,33 +180,6 @@ pub mod collections {
             }
         }
     }
-    pub mod axie_transfer {
-        use mongodb::bson::DateTime;
-        use serde::{Deserialize, Serialize};
-        use sha2::digest::Update;
-        use sha2::{Digest, Sha256};
-
-        use crate::mongo::collections::{Address, Block};
-
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        pub struct AxieTransfer {
-            pub from: Address,
-            pub to: Address,
-            pub axie: u32,
-            pub block: Block,
-            pub created_at: DateTime,
-            pub transfer_id: String,
-        }
-
-        impl AxieTransfer {
-            pub fn get_transfer_id(from: &str, to: &str, axie: &u32, block: &Block) -> String {
-                let id = f!("{from}{to}{axie}{block}");
-                let mut hasher = Sha256::new();
-                Update::update(&mut hasher, id.as_bytes());
-                format!("{:x}", hasher.finalize())
-            }
-        }
-    }
 
     pub mod transaction_pool {
         use mongodb::bson::Document;
@@ -299,14 +271,12 @@ pub async fn connect(hostname: String, database: String) -> Database {
     let transaction_collection = db.collection::<Transaction>("transactions");
     let statistic_collection = db.collection::<Statistic>("statistics");
     let erc_transfer_collection = db.collection::<ERCTransfer>("erc_transfers");
-    let axie_transfer_collection = db.collection::<AxieTransfer>("axie_transfers");
 
     Database {
         wallets: WalletProvider::new(wallet_collection),
         transactions: transaction_collection,
         statistics: StatisticProvider::new(statistic_collection),
         erc_transfers: erc_transfer_collection,
-        axie_transfers: axie_transfer_collection,
         _client: client,
     }
 }
