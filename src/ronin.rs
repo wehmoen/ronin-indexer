@@ -511,8 +511,6 @@ impl Ronin {
                     .await
                     .expect("Failed to update wallets");
 
-                println!("{}", wallet_pool.len());
-
                 println!(
                     "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tAxie Transfers: {:>5}\tWallet Updates: {:>5}",
                     &current_block,
