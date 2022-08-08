@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Add;
 use std::thread;
 use std::time::Duration;
 
@@ -195,7 +196,7 @@ impl Ronin {
         web3::helpers::to_string(request).replace("\"", "")
     }
 
-    pub async fn new(hostname: String, database: Database) -> Ronin {
+    pub async fn new(hostname: &str, database: Database) -> Ronin {
         let parsed = Url::parse(&hostname)
             .expect(format!("Failed to parse web3 hostname: {}", &hostname).as_str());
         let provider = match parsed.scheme() {
@@ -288,7 +289,7 @@ impl Ronin {
 
         println!("[INFO] Streaming from {} to {}", &start, &stream_stop_block);
 
-        let mut current_block: Block = start.clone();
+        let mut current_block: Block = start.to_owned();
         let mut wallet_pool: Pool<Wallet> = self.database.wallets.get_pool();
 
         loop {
@@ -315,7 +316,7 @@ impl Ronin {
                         .settings
                         .set(
                             "largest_block_by_tx_num",
-                            serde_json::to_string(&largest_block_by_tx_num).unwrap(),
+                            &serde_json::to_string(&largest_block_by_tx_num).unwrap(),
                         )
                         .await
                         .expect("Failed to store largest_block_by_tx_num!");
@@ -330,21 +331,21 @@ impl Ronin {
                     let tx_hash = self.to_string(&tx.hash);
 
                     wallet_pool.update(self.database.wallets.update(
-                        tx_from.clone(),
+                        &tx_from,
                         block_number,
-                        tx_hash.clone(),
+                        &tx_hash,
                     ));
 
                     wallet_pool.update(self.database.wallets.update(
-                        tx_to.clone(),
+                        &tx_to,
                         block_number,
-                        tx_hash.clone(),
+                        &tx_hash,
                     ));
 
                     let receipt: web3::types::TransactionReceipt = self
                         .provider
                         .eth()
-                        .transaction_receipt(tx.hash.clone())
+                        .transaction_receipt(tx.hash)
                         .await
                         .expect("Failed to retrieve transaction receipt!")
                         .expect("Failed to unwrap transaction receipt!");
@@ -372,7 +373,7 @@ impl Ronin {
                                             let event_data = transfer_events
                                                 .get(&contract.erc)
                                                 .unwrap()
-                                                .clone()
+                                                .to_owned()
                                                 .parse_log(raw_log)
                                                 .expect("Failed to parsed transaction log!");
 
@@ -385,13 +386,13 @@ impl Ronin {
                                             let to = f!("0x{to}");
 
                                             let signature = ERCTransfer::get_transfer_id(
-                                                self.to_string(&log.transaction_hash),
-                                                self.to_string(&log.log_index),
+                                                &self.to_string(&log.transaction_hash),
+                                                &self.to_string(&log.log_index),
                                             );
 
                                             erc_pool.insert(ERCTransfer {
-                                                from: from.clone(),
-                                                to: to.clone(),
+                                                from,
+                                                to: to,
                                                 token: contract_address.to_owned(),
                                                 value_or_token_id: self.to_string(
                                                     &event_data.params[2].value.to_string(),
@@ -401,7 +402,7 @@ impl Ronin {
                                                     .to_string(&log.transaction_hash),
                                                 erc: contract.erc.to_owned(),
                                                 log_index: self.to_string(&log.log_index),
-                                                log_id: signature.clone(),
+                                                log_id: signature,
                                             });
                                         }
                                     }
@@ -414,8 +415,8 @@ impl Ronin {
                     let to = f!("0x{tx_to}");
 
                     tx_pool.push(Transaction {
-                        from: from.clone(),
-                        to: to.clone(),
+                        from,
+                        to,
                         hash: self.to_string(&tx.hash),
                         block: current_block,
                         timestamp: timestamp,
@@ -467,7 +468,7 @@ impl Ronin {
                 .await
                 .expect("Failed to store last_block!");
 
-            current_block = current_block + 1u64;
+            current_block = current_block.add(1);
 
             if current_block >= stream_stop_block {
                 break;

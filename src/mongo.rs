@@ -93,10 +93,10 @@ pub mod collections {
                     .unwrap()
             }
 
-            pub async fn set(
+            pub async fn set<S: Into<String>>(
                 &self,
                 key: &'static str,
-                value: String,
+                value: S,
             ) -> mongodb::error::Result<UpdateResult> {
                 self.collection
                     .update_one(
@@ -106,7 +106,7 @@ pub mod collections {
                         doc! {
                             "$set": {
                                 "key": key,
-                                "value": value
+                                "value": value.into()
                             }
                         },
                         UpdateOptions::builder().upsert(Some(true)).build(),
@@ -154,14 +154,14 @@ pub mod collections {
 
         impl WalletProvider {
             pub(crate) fn get_pool(&self) -> Pool<Wallet> {
-                Pool::new(self.collection.clone())
+                Pool::new(self.collection.to_owned())
             }
 
             pub fn update(
                 &self,
-                address: Address,
+                address: &Address,
                 block: Block,
-                transaction: TransactionHash,
+                transaction: &TransactionHash,
             ) -> [Document; 2] {
                 [
                     doc! {"address": &address},
@@ -270,15 +270,16 @@ pub mod collections {
             }
 
             pub(crate) fn get_pool(&self) -> Pool<ERCTransfer> {
-                Pool::new(self.collection.clone())
+                Pool::new(self.collection.to_owned())
             }
         }
 
         impl ERCTransfer {
-            pub fn get_transfer_id(hash: String, index: String) -> String {
-                let id = f!("{hash}-{index}");
+            pub fn get_transfer_id(hash: &str, index: &str) -> String {
                 let mut hasher = Sha256::new();
-                Update::update(&mut hasher, id.as_bytes());
+                Update::update(&mut hasher, hash.as_bytes());
+                Update::update(&mut hasher, &[b'-']);
+                Update::update(&mut hasher, index.as_bytes());
                 format!("{:x}", hasher.finalize())
             }
         }
@@ -308,16 +309,16 @@ pub mod collections {
                 }
             }
 
-            fn has_update(&self, doc: Document) -> Option<usize> {
-                self.updates.clone().into_iter().position(|d| d[0].eq(&doc))
+            fn has_update(&self, doc: &Document) -> Option<usize> {
+                self.updates.iter().position(|d| d[0].eq(&doc))
             }
 
-            fn has_insert(&self, doc: T) -> Option<usize> {
-                self.inserts.clone().into_iter().position(|d| d.eq(&doc))
+            fn has_insert(&self, doc: &T) -> Option<usize> {
+                self.inserts.iter().position(|d| d.eq(&doc))
             }
 
             pub fn insert(&mut self, insert: T) {
-                let existing = self.has_insert(insert.clone());
+                let existing = self.has_insert(&insert);
 
                 match existing {
                     None => {
@@ -331,7 +332,7 @@ pub mod collections {
             }
 
             pub fn update(&mut self, update: [Document; 2]) {
-                let existing = self.has_update(update[0].clone());
+                let existing = self.has_update(&update[0]);
 
                 match existing {
                     None => {
@@ -358,7 +359,7 @@ pub mod collections {
                 if self.inserts.len() > 0 {
                     self.collection
                         .insert_many_with_session(
-                            self.inserts.clone(),
+                            &self.inserts,
                             InsertManyOptions::builder().ordered(false).build(),
                             &mut session,
                         )
@@ -393,6 +394,7 @@ pub mod collections {
                 session.commit_transaction().await?;
 
                 self.updates.clear();
+                self.inserts.clear();
 
                 Ok(self)
             }
@@ -400,12 +402,12 @@ pub mod collections {
     }
 }
 
-pub async fn connect(hostname: String, database: String) -> Database {
-    let client = mongodb::Client::with_uri_str(&hostname)
+pub async fn connect(hostname: &str, database: &str) -> Database {
+    let client = Client::with_uri_str(&hostname)
         .await
         .expect(format!("Failed to connect to mongodb at {}", &hostname).as_str());
 
-    let db = client.database(database.as_str());
+    let db = client.database(database);
 
     let wallets = WalletProvider::new(db.collection::<Wallet>("wallets"));
     let transactions = TransactionProvider::new(db.collection::<Transaction>("transactions"));
@@ -491,7 +493,7 @@ impl Database {
             }
 
             self.settings
-                .set("setup", "1".to_string())
+                .set("setup", "1")
                 .await
                 .expect("Failed to complete setup!");
         }
