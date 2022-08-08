@@ -1,6 +1,8 @@
+use mongodb::bson::doc;
 use mongodb::options::IndexOptions;
-use mongodb::{bson::Document, Client, ClientSession, Collection};
+use mongodb::{bson::Document, Client, ClientSession};
 
+use crate::mongo::collections::erc_transfer::ErcTransferProvider;
 use crate::mongo::collections::transaction::TransactionProvider;
 use crate::mongo::collections::{
     erc_transfer::ERCTransfer,
@@ -29,16 +31,27 @@ pub trait Indexable {
     fn index_model(&self) -> Vec<IndexModel>;
 }
 
+fn index_model(key: &'static str, unique: bool) -> IndexModel {
+    IndexModel {
+        model: doc! {
+            key: 1u32
+        },
+        options: match unique {
+            true => IndexOptions::builder().unique(true).build(),
+            false => Default::default(),
+        },
+    }
+}
+
 pub struct Database {
     pub wallets: WalletProvider,
     pub transactions: TransactionProvider,
     pub settings: SettingsProvider,
-    pub erc_transfers: Collection<ERCTransfer>, //Todo: Create provider
+    pub erc_transfers: ErcTransferProvider,
     pub _client: Client,
 }
 
 pub mod collections {
-
     pub type Address = String;
     pub type TransactionHash = String;
     pub type Block = u64;
@@ -50,7 +63,7 @@ pub mod collections {
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
 
-        use crate::mongo::{IndexModel, Indexable};
+        use crate::mongo::{index_model, IndexModel, Indexable};
 
         #[derive(Serialize, Deserialize)]
         pub struct Settings {
@@ -102,28 +115,18 @@ pub mod collections {
         }
         impl Indexable for SettingsProvider {
             fn index_model(&self) -> Vec<IndexModel> {
-                let mut models: Vec<IndexModel> = vec![];
-
-                models.push(IndexModel {
-                    model: doc! {
-                        "key": 1u32
-                    },
-                    options: Default::default(),
-                });
-
-                models
+                vec![index_model("key", true)]
             }
         }
     }
     pub mod wallet {
         use mongodb::bson::{doc, Document};
-        use mongodb::options::IndexOptions;
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
 
         use crate::mongo::collections::transaction_pool::Pool;
         use crate::mongo::collections::{Address, Block, TransactionHash};
-        use crate::mongo::{IndexModel, Indexable};
+        use crate::mongo::{index_model, IndexModel, Indexable};
 
         #[derive(Serialize, Deserialize, Clone)]
         pub struct WalletActivity {
@@ -144,12 +147,7 @@ pub mod collections {
 
         impl Indexable for WalletProvider {
             fn index_model(&self) -> Vec<IndexModel> {
-                vec![IndexModel {
-                    model: doc! {
-                        "address": 1u32
-                    },
-                    options: IndexOptions::builder().unique(true).build(),
-                }]
+                vec![index_model("address", true)]
             }
         }
 
@@ -184,12 +182,11 @@ pub mod collections {
     }
     pub mod transaction {
         use mongodb::bson::doc;
-        use mongodb::options::IndexOptions;
         use mongodb::Collection;
         pub use serde::{Deserialize, Serialize};
 
         use crate::mongo::collections::{Address, Block, TransactionHash};
-        use crate::mongo::{IndexModel, Indexable};
+        use crate::mongo::{index_model, IndexModel, Indexable};
 
         #[derive(Serialize, Deserialize)]
         pub struct Transaction {
@@ -213,40 +210,23 @@ pub mod collections {
         impl Indexable for TransactionProvider {
             fn index_model(&self) -> Vec<IndexModel> {
                 vec![
-                    IndexModel {
-                        model: doc! {
-                            "hash": 1u32
-                        },
-                        options: IndexOptions::builder().unique(true).build(),
-                    },
-                    IndexModel {
-                        model: doc! {
-                            "block": 1u32
-                        },
-                        options: Default::default(),
-                    },
-                    IndexModel {
-                        model: doc! {
-                            "from": 1u32
-                        },
-                        options: Default::default(),
-                    },
-                    IndexModel {
-                        model: doc! {
-                            "to": 1u32
-                        },
-                        options: Default::default(),
-                    },
+                    index_model("hash", true),
+                    index_model("block", false),
+                    index_model("from", false),
+                    index_model("to", false),
                 ]
             }
         }
     }
     pub mod erc_transfer {
+        use mongodb::bson::doc;
+        use mongodb::Collection;
         use serde::{Deserialize, Serialize};
         use sha2::digest::Update;
         use sha2::{Digest, Sha256};
 
         use crate::mongo::collections::{Address, Block};
+        use crate::mongo::{index_model, IndexModel, Indexable};
         use crate::ronin::ContractType;
 
         #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -260,6 +240,32 @@ pub mod collections {
             pub erc: ContractType,
             pub log_index: String,
             pub log_id: String,
+        }
+
+        pub struct ErcTransferProvider {
+            pub collection: Collection<ERCTransfer>,
+        }
+
+        impl Indexable for ErcTransferProvider {
+            fn index_model(&self) -> Vec<IndexModel> {
+                vec![
+                    index_model("log_id", true),
+                    index_model("from", false),
+                    index_model("to", false),
+                    index_model("token", false),
+                    index_model("value_or_token_id", false),
+                    index_model("block", false),
+                    index_model("transaction_id", false),
+                    index_model("erc", false),
+                    index_model("log_index", false),
+                ]
+            }
+        }
+
+        impl ErcTransferProvider {
+            pub fn new(collection: Collection<ERCTransfer>) -> ErcTransferProvider {
+                ErcTransferProvider { collection }
+            }
         }
 
         impl ERCTransfer {
@@ -359,14 +365,14 @@ pub async fn connect(hostname: String, database: String) -> Database {
 
     let wallets = WalletProvider::new(db.collection::<Wallet>("wallets"));
     let transactions = TransactionProvider::new(db.collection::<Transaction>("transactions"));
-    let erc_transfer_collection = db.collection::<ERCTransfer>("erc_transfers");
+    let erc_transfers = ErcTransferProvider::new(db.collection::<ERCTransfer>("erc_transfers"));
     let settings = SettingsProvider::new(db.collection::<Settings>("settings"));
 
     let database = Database {
         wallets,
         transactions,
         settings,
-        erc_transfers: erc_transfer_collection,
+        erc_transfers,
         _client: client,
     };
 

@@ -8,6 +8,7 @@ use web3::transports::{Either, Http, WebSocket};
 use web3::types::{BlockId, BlockNumber};
 use web3::Web3;
 
+use crate::mongo::collections::transaction::Transaction;
 use crate::mongo::collections::transaction_pool::Pool;
 use crate::mongo::collections::wallet::Wallet;
 use crate::mongo::collections::{erc_transfer::ERCTransfer, Block};
@@ -287,7 +288,7 @@ impl Ronin {
                         .expect("Failed to store largest_block_by_tx_num!");
                 }
 
-                let mut tx_pool: Vec<crate::mongo::collections::transaction::Transaction> = vec![];
+                let mut tx_pool: Vec<Transaction> = vec![];
                 let mut erc_transfer_pool: Vec<ERCTransfer> = vec![];
 
                 for tx in block.transactions {
@@ -464,7 +465,7 @@ impl Ronin {
                     let to = web3::helpers::to_string(&tx.to).replace("\"", "");
                     let to = f!("0x{to}");
 
-                    tx_pool.push(crate::mongo::collections::transaction::Transaction {
+                    tx_pool.push(Transaction {
                         from: from.clone(),
                         to: to.clone(),
                         hash: web3::helpers::to_string(&tx.hash).replace("\"", ""),
@@ -481,6 +482,7 @@ impl Ronin {
                     .ok();
                 self.database
                     .erc_transfers
+                    .collection
                     .insert_many(&erc_transfer_pool, None)
                     .await
                     .ok();
