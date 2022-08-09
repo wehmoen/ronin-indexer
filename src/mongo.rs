@@ -463,7 +463,7 @@ pub async fn connect(hostname: &str, database: &str) -> Database {
     let transactions = TransactionProvider::new(db.collection::<Transaction>("transactions"));
     let erc_transfers = ErcTransferProvider::new(db.collection::<ERCTransfer>("erc_transfers"));
     let settings = SettingsProvider::new(db.collection::<Settings>("settings"));
-    let erc_sales = SaleProvider::new(db.collection::<Sale>("erc_sales"));
+    let erc_sales = SaleProvider::new(db.collection::<Sale>("erc721_sales"));
 
     let database = Database {
         wallets,

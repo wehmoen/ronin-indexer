@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use web3::ethabi::{Event, EventParam, ParamType, RawLog};
 use web3::transports::{Either, Http, WebSocket};
-use web3::types::{BlockId, BlockNumber, TransactionReceipt};
+use web3::types::{BlockId, BlockNumber, Log, TransactionReceipt};
 use web3::Web3;
 
 use crate::mongo::collections::axie_sale::Sale;
@@ -30,7 +30,7 @@ const MARKETPLACE_V2_ORDER_MATCHED_TOPIC: &str =
 const MARKETPLACE_V2_DEPLOY_BLOCK: Block = 16027461;
 
 const MARKETPLACE_AXIE_SALE_TOPIC: &str =
-    "0c0258cd7f0d9474f62106c6981c027ea54bee0b323ea1991f4caa7e288a5725";
+    "0x0c0258cd7f0d9474f62106c6981c027ea54bee0b323ea1991f4caa7e288a5725";
 
 pub struct Ronin {
     database: Database,
@@ -48,6 +48,7 @@ pub enum ContractType {
     ERC721,
     Unknown,
     MarketplaceV2,
+    LegacyErc721Sale,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -86,6 +87,41 @@ impl Ronin {
                     },
                     EventParam {
                         name: "_value".to_string(),
+                        kind: ParamType::Uint(256),
+                        indexed: false,
+                    },
+                ],
+                anonymous: false,
+            },
+        );
+
+        map.insert(
+            ContractType::LegacyErc721Sale,
+            Event {
+                name: "AuctionSuccessful".to_string(),
+                inputs: vec![
+                    EventParam {
+                        name: "_seller".to_string(),
+                        kind: ParamType::Address,
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "_buyer".to_string(),
+                        kind: ParamType::Address,
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "_listingIndex".to_string(),
+                        kind: ParamType::Uint(256),
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "_token".to_string(),
+                        kind: ParamType::Address,
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "_totalPrice".to_string(),
                         kind: ParamType::Uint(256),
                         indexed: false,
                     },
@@ -324,6 +360,86 @@ impl Ronin {
         }
     }
 
+    async fn legacy_erc_sale(&self, tx: &TransactionReceipt) -> Option<Sale> {
+        if !tx.logs.is_empty() {
+            let contracts: Vec<&str> = Ronin::contract_list()
+                .values()
+                .filter(|c| c.erc == ERC721)
+                .map(|c| c.address)
+                .collect();
+
+            let sale_log = tx
+                .logs
+                .iter()
+                .filter(|x| {
+                    match x
+                        .topics
+                        .iter()
+                        .find(|x| self.to_string(x) == MARKETPLACE_AXIE_SALE_TOPIC)
+                    {
+                        None => false,
+                        Some(_) => true,
+                    }
+                })
+                .collect::<Vec<&Log>>();
+
+            match sale_log.is_empty() {
+                true => None,
+                false => {
+                    let transfer_log = tx
+                        .logs
+                        .iter()
+                        .filter(|x| {
+                            self.to_string(&x.topics[0]) == ERC_TRANSFER_TOPIC
+                                && contracts.contains(&self.to_string(&x.address).as_str())
+                        })
+                        .collect::<Vec<&Log>>();
+
+                    if !transfer_log.is_empty() {
+                        let parsed_sale = Ronin::transfer_events()
+                            .get(&ContractType::LegacyErc721Sale)
+                            .unwrap()
+                            .parse_log(RawLog {
+                                topics: sale_log[0].to_owned().topics,
+                                data: sale_log[0].to_owned().data.0,
+                            })
+                            .unwrap();
+
+                        let parsed_transfer = Ronin::transfer_events()
+                            .get(&ContractType::ERC721)
+                            .unwrap()
+                            .parse_log(RawLog {
+                                topics: transfer_log[0].to_owned().topics,
+                                data: transfer_log[0].to_owned().data.0,
+                            })
+                            .unwrap();
+
+                        Some(Sale {
+                            seller: self.prefix(
+                                &self.to_string(&parsed_sale.params[0].value.to_string()),
+                                AddressPrefix::Ethereum,
+                            ),
+                            buyer: self.prefix(
+                                &self.to_string(&parsed_sale.params[1].value.to_string()),
+                                AddressPrefix::Ethereum,
+                            ),
+                            price: self.to_string(&parsed_sale.params[4].value.to_string()),
+                            seller_received: self
+                                .to_string(&parsed_sale.params[4].value.to_string()),
+                            token: self.to_string(&parsed_sale.params[2].value.to_string()),
+                            token_id: self.to_string(&parsed_transfer.params[2].value.to_string()),
+                            transaction_id: self.to_string(&tx.transaction_hash),
+                        })
+                    } else {
+                        None
+                    }
+                }
+            }
+        } else {
+            None
+        }
+    }
+
     pub async fn order_matched(&self, tx: &TransactionReceipt) -> Option<Sale> {
         if !tx.logs.is_empty()
             && tx.logs[0].topics[0] == MARKETPLACE_V2_ORDER_MATCHED_TOPIC.parse().unwrap()
@@ -532,6 +648,13 @@ impl Ronin {
 
                     if current_block > MARKETPLACE_V2_DEPLOY_BLOCK {
                         match self.order_matched(&receipt).await {
+                            None => {}
+                            Some(sale) => {
+                                erc_sale_pool.insert(sale);
+                            }
+                        }
+                    } else {
+                        match self.legacy_erc_sale(&receipt).await {
                             None => {}
                             Some(sale) => {
                                 erc_sale_pool.insert(sale);
