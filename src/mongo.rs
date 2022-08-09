@@ -1,6 +1,7 @@
 use mongodb::options::IndexOptions;
-use mongodb::{bson::Document, Client, ClientSession};
+use mongodb::{bson::Document, Client};
 
+use crate::mongo::collections::axie_sale::{Sale, SaleProvider};
 use crate::mongo::collections::erc_transfer::ErcTransferProvider;
 use crate::mongo::collections::transaction::TransactionProvider;
 use crate::mongo::collections::{
@@ -11,16 +12,6 @@ use crate::mongo::collections::{
     wallet::WalletProvider,
 };
 
-pub struct SessionBuilder {}
-impl SessionBuilder {
-    pub async fn build(client: &Client) -> ClientSession {
-        client
-            .start_session(None)
-            .await
-            .expect("Failed to create session!")
-    }
-}
-
 pub struct IndexModel {
     pub model: Document,
     pub options: IndexOptions,
@@ -28,6 +19,7 @@ pub struct IndexModel {
 
 pub trait Indexable {
     fn index_model(&self) -> Vec<IndexModel>;
+    fn index_setup_key(&self) -> &'static str;
 }
 
 fn index_model(key: &'static str, unique: bool) -> IndexModel {
@@ -48,6 +40,7 @@ pub struct Database {
     pub transactions: TransactionProvider,
     pub settings: SettingsProvider,
     pub erc_transfers: ErcTransferProvider,
+    pub erc_sales: SaleProvider,
     pub _client: Client,
     pub _database: mongodb::Database,
 }
@@ -118,6 +111,10 @@ pub mod collections {
             fn index_model(&self) -> Vec<IndexModel> {
                 vec![index_model("key", true)]
             }
+
+            fn index_setup_key(&self) -> &'static str {
+                "settings"
+            }
         }
     }
     pub mod wallet {
@@ -150,6 +147,10 @@ pub mod collections {
             fn index_model(&self) -> Vec<IndexModel> {
                 vec![index_model("address", true)]
             }
+
+            fn index_setup_key(&self) -> &'static str {
+                "setup.wallets"
+            }
         }
 
         impl WalletProvider {
@@ -181,6 +182,56 @@ pub mod collections {
             }
         }
     }
+
+    pub mod axie_sale {
+        use mongodb::Collection;
+        use serde::{Deserialize, Serialize};
+
+        use crate::mongo::collections::transaction_pool::Pool;
+        use crate::mongo::collections::Address;
+        use crate::mongo::{index_model, IndexModel, Indexable};
+
+        #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+        pub struct Sale {
+            pub seller: Address,
+            pub buyer: Address,
+            pub price: String,
+            pub seller_received: String,
+            pub token: Address,
+            pub token_id: String,
+            pub transaction_id: String,
+        }
+
+        pub struct SaleProvider {
+            pub(crate) collection: Collection<Sale>,
+        }
+
+        impl SaleProvider {
+            pub fn new(collection: Collection<Sale>) -> SaleProvider {
+                SaleProvider { collection }
+            }
+
+            pub(crate) fn get_pool(&self) -> Pool<Sale> {
+                Pool::new(self.collection.to_owned())
+            }
+        }
+
+        impl Indexable for SaleProvider {
+            fn index_model(&self) -> Vec<IndexModel> {
+                vec![
+                    index_model("seller", false),
+                    index_model("buyer", false),
+                    index_model("token_id", false),
+                    index_model("token", false),
+                ]
+            }
+
+            fn index_setup_key(&self) -> &'static str {
+                "setup.erc_sales"
+            }
+        }
+    }
+
     pub mod transaction {
         use mongodb::bson::doc;
         use mongodb::Collection;
@@ -216,6 +267,10 @@ pub mod collections {
                     index_model("from", false),
                     index_model("to", false),
                 ]
+            }
+
+            fn index_setup_key(&self) -> &'static str {
+                "setup.transactions"
             }
         }
     }
@@ -261,6 +316,10 @@ pub mod collections {
                     index_model("erc", false),
                     index_model("log_index", false),
                 ]
+            }
+
+            fn index_setup_key(&self) -> &'static str {
+                "setup.erc_transfers"
             }
         }
 
@@ -349,20 +408,12 @@ pub mod collections {
                 self.updates.len() + self.inserts.len()
             }
 
-            pub async fn commit(
-                &mut self,
-                mut _session: mongodb::ClientSession,
-                upsert: bool,
-            ) -> Result<&mut Pool<T>, Error> {
-                // session.start_transaction(None).await?;
-
+            pub async fn commit(&mut self, upsert: bool) -> Result<&mut Pool<T>, Error> {
                 if !self.inserts.is_empty() {
                     self.collection
-                        // .insert_many_with_session(
                         .insert_many(
                             &self.inserts,
                             InsertManyOptions::builder().ordered(false).build(),
-                            // &mut session,
                         )
                         .await
                         .ok(); // Todo: figure out a way how to handle errors without inserting docs one by one
@@ -377,12 +428,10 @@ pub mod collections {
                     for update in self.updates.as_slice() {
                         match self
                             .collection
-                            // .update_one_with_session(
                             .update_one(
                                 update[0].to_owned(),
                                 update[1].to_owned(),
                                 options.to_owned(),
-                                // &mut session,
                             )
                             .await
                         {
@@ -393,8 +442,6 @@ pub mod collections {
                         }
                     }
                 }
-
-                // session.commit_transaction().await?;
 
                 self.updates.clear();
                 self.inserts.clear();
@@ -416,11 +463,13 @@ pub async fn connect(hostname: &str, database: &str) -> Database {
     let transactions = TransactionProvider::new(db.collection::<Transaction>("transactions"));
     let erc_transfers = ErcTransferProvider::new(db.collection::<ERCTransfer>("erc_transfers"));
     let settings = SettingsProvider::new(db.collection::<Settings>("settings"));
+    let erc_sales = SaleProvider::new(db.collection::<Sale>("erc_sales"));
 
     let database = Database {
         wallets,
         transactions,
         settings,
+        erc_sales,
         erc_transfers,
         _client: client,
         _database: db,
@@ -433,12 +482,34 @@ pub async fn connect(hostname: &str, database: &str) -> Database {
 
 impl Database {
     pub async fn create_indexes(&self) {
-        let create = match self.settings.get("setup").await {
+        let create_settings = match self.settings.get(self.settings.index_setup_key()).await {
             None => true,
             Some(_) => false,
         };
 
-        if create {
+        let create_wallets = match self.settings.get(self.wallets.index_setup_key()).await {
+            None => true,
+            Some(_) => false,
+        };
+        let create_transactions = match self.settings.get(self.transactions.index_setup_key()).await
+        {
+            None => true,
+            Some(_) => false,
+        };
+        let create_erc_transfers = match self
+            .settings
+            .get(self.erc_transfers.index_setup_key())
+            .await
+        {
+            None => true,
+            Some(_) => false,
+        };
+        let create_erc_sales = match self.settings.get(self.erc_sales.index_setup_key()).await {
+            None => true,
+            Some(_) => false,
+        };
+
+        if create_settings {
             for model in self.settings.index_model() {
                 self.settings
                     .collection
@@ -453,6 +524,12 @@ impl Database {
                     .expect("Failed to create settings index!");
             }
 
+            self.settings
+                .set(self.settings.index_setup_key(), "1")
+                .await
+                .expect("Failed to complete setup!");
+        }
+        if create_wallets {
             for model in self.wallets.index_model() {
                 self.wallets
                     .collection
@@ -466,7 +543,12 @@ impl Database {
                     .await
                     .expect("Failed to create wallet index!");
             }
-
+            self.settings
+                .set(self.wallets.index_setup_key(), "1")
+                .await
+                .expect("Failed to complete setup!");
+        }
+        if create_transactions {
             for model in self.transactions.index_model() {
                 self.transactions
                     .collection
@@ -480,7 +562,12 @@ impl Database {
                     .await
                     .expect("Failed to create transaction index!");
             }
-
+            self.settings
+                .set(self.transactions.index_setup_key(), "1")
+                .await
+                .expect("Failed to complete setup!");
+        }
+        if create_erc_transfers {
             for model in self.erc_transfers.index_model() {
                 self.erc_transfers
                     .collection
@@ -494,9 +581,27 @@ impl Database {
                     .await
                     .expect("Failed to create erc_transfer index!");
             }
-
             self.settings
-                .set("setup", "1")
+                .set(self.erc_transfers.index_setup_key(), "1")
+                .await
+                .expect("Failed to complete setup!");
+        }
+        if create_erc_sales {
+            for model in self.erc_sales.index_model() {
+                self.erc_sales
+                    .collection
+                    .create_index(
+                        mongodb::IndexModel::builder()
+                            .keys(model.model)
+                            .options(model.options)
+                            .build(),
+                        None,
+                    )
+                    .await
+                    .expect("Failed to create erc_sales index!");
+            }
+            self.settings
+                .set(self.erc_sales.index_setup_key(), "1")
                 .await
                 .expect("Failed to complete setup!");
         }

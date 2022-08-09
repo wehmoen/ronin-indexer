@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate fstrings;
+
 use crate::ronin::Ronin;
 
 mod cli_args;

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::ops::Add;
+use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
@@ -8,23 +10,36 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use web3::ethabi::{Event, EventParam, ParamType, RawLog};
 use web3::transports::{Either, Http, WebSocket};
-use web3::types::{BlockId, BlockNumber};
+use web3::types::{BlockId, BlockNumber, TransactionReceipt};
 use web3::Web3;
 
+use crate::mongo::collections::axie_sale::Sale;
 use crate::mongo::collections::transaction::Transaction;
 use crate::mongo::collections::transaction_pool::Pool;
 use crate::mongo::collections::wallet::Wallet;
 use crate::mongo::collections::{erc_transfer::ERCTransfer, Block};
-use crate::mongo::{Database, SessionBuilder};
+use crate::mongo::Database;
+use crate::ronin::ContractType::ERC721;
 
 const ERC_TRANSFER_TOPIC: &str =
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
-//const AXIE_SALE_TOPIC: &str = "0c0258cd7f0d9474f62106c6981c027ea54bee0b323ea1991f4caa7e288a5725"; // Todo: Implement axie sale indexing
+const MARKETPLACE_V2_ORDER_MATCHED_TOPIC: &str =
+    "0xafa0d706792fa5d4e9aaf5e456e08e2a833b1e64a201710b782f29172f6d7a3a";
+
+const MARKETPLACE_V2_DEPLOY_BLOCK: Block = 16027461;
+
+const MARKETPLACE_AXIE_SALE_TOPIC: &str =
+    "0c0258cd7f0d9474f62106c6981c027ea54bee0b323ea1991f4caa7e288a5725";
 
 pub struct Ronin {
     database: Database,
-    provider: Web3<Either<WebSocket, Http>>,
+    pub provider: Web3<Either<WebSocket, Http>>,
+}
+
+pub enum AddressPrefix {
+    // Ronin,
+    Ethereum,
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Debug, Clone)]
@@ -32,6 +47,7 @@ pub enum ContractType {
     ERC20,
     ERC721,
     Unknown,
+    MarketplaceV2,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -39,6 +55,7 @@ pub struct Contract {
     pub name: &'static str,
     pub decimals: usize,
     pub erc: ContractType,
+    pub address: &'static str,
 }
 
 pub type ContractList = HashMap<&'static str, Contract>;
@@ -102,6 +119,71 @@ impl Ronin {
             },
         );
 
+        map.insert(
+            ContractType::MarketplaceV2,
+            Event {
+                name: "OrderMatched".to_string(),
+                inputs: vec![
+                    EventParam {
+                        name: "hash".to_string(),
+                        kind: ParamType::FixedBytes(32),
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "maker".to_string(),
+                        kind: ParamType::Address,
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "matcher".to_string(),
+                        kind: ParamType::Address,
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "kind".to_string(),
+                        kind: ParamType::Uint(8),
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "bidToken".to_string(),
+                        kind: ParamType::Address,
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "bidPrice".to_string(),
+                        kind: ParamType::Uint(256),
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "paymentToken".to_string(),
+                        kind: ParamType::Address,
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "settlePrice".to_string(),
+                        kind: ParamType::Uint(256),
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "sellerReceived".to_string(),
+                        kind: ParamType::Uint(256),
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "marketFeePercentage".to_string(),
+                        kind: ParamType::Uint(256),
+                        indexed: false,
+                    },
+                    EventParam {
+                        name: "marketFeeTaken".to_string(),
+                        kind: ParamType::Uint(256),
+                        indexed: false,
+                    },
+                ],
+                anonymous: false,
+            },
+        );
+
         map
     }
 
@@ -114,6 +196,7 @@ impl Ronin {
                 name: "WETH",
                 decimals: 18,
                 erc: ContractType::ERC20,
+                address: "0xc99a6a985ed2cac1ef41640596c5a5f9f4e19ef5",
             },
         );
 
@@ -123,6 +206,7 @@ impl Ronin {
                 name: "AXS",
                 decimals: 18,
                 erc: ContractType::ERC20,
+                address: "0xed4a9f48a62fb6fdcfb45bb00c9f61d1a436e58c",
             },
         );
 
@@ -132,6 +216,7 @@ impl Ronin {
                 name: "SLP",
                 decimals: 0,
                 erc: ContractType::ERC20,
+                address: "0xa8754b9fa15fc18bb59458815510e40a12cd2014",
             },
         );
 
@@ -141,6 +226,7 @@ impl Ronin {
                 name: "AEC",
                 decimals: 0,
                 erc: ContractType::ERC20,
+                address: "0x173a2d4fa585a63acd02c107d57f932be0a71bcc",
             },
         );
 
@@ -150,6 +236,7 @@ impl Ronin {
                 name: "USDC",
                 decimals: 18,
                 erc: ContractType::ERC20,
+                address: "0x0b7007c13325c48911f73a2dad5fa5dcbf808adc",
             },
         );
 
@@ -159,6 +246,7 @@ impl Ronin {
                 name: "WRON",
                 decimals: 18,
                 erc: ContractType::ERC20,
+                address: "0xe514d9deb7966c8be0ca922de8a064264ea6bcd4",
             },
         );
 
@@ -168,6 +256,7 @@ impl Ronin {
                 name: "AXIE",
                 decimals: 0,
                 erc: ContractType::ERC721,
+                address: "0x32950db2a7164ae833121501c797d79e7b79d74c",
             },
         );
 
@@ -177,6 +266,7 @@ impl Ronin {
                 name: "LAND",
                 decimals: 0,
                 erc: ContractType::ERC721,
+                address: "0x8c811e3c958e190f5ec15fb376533a3398620500",
             },
         );
 
@@ -186,14 +276,26 @@ impl Ronin {
                 name: "ITEM",
                 decimals: 0,
                 erc: ContractType::ERC721,
+                address: "0xa96660f0e4a3e9bc7388925d245a6d4d79e21259",
             },
         );
 
         map
     }
 
-    fn to_string<T: serde::Serialize>(&self, request: &T) -> String {
+    pub fn to_string<T: serde::Serialize>(&self, request: &T) -> String {
         web3::helpers::to_string(request).replace('\"', "")
+    }
+
+    pub fn prefix<T: FromStr + Display>(&self, request: &T, prefix: AddressPrefix) -> String {
+        match prefix {
+            // AddressPrefix::Ronin => {
+            //     f!("ronin:{request}")
+            // }
+            AddressPrefix::Ethereum => {
+                f!("0x{request}")
+            }
+        }
     }
 
     pub async fn new(hostname: &str, database: Database) -> Ronin {
@@ -220,6 +322,81 @@ impl Ronin {
             provider: Web3::new(provider),
             database,
         }
+    }
+
+    pub async fn order_matched(&self, tx: &TransactionReceipt) -> Option<Sale> {
+        if tx.logs[0].topics[0] == MARKETPLACE_V2_ORDER_MATCHED_TOPIC.parse().unwrap() {
+            let contracts: Vec<&str> = Ronin::contract_list()
+                .values()
+                .filter(|c| c.erc == ERC721)
+                .map(|c| c.address)
+                .collect();
+
+            let log = tx.logs[0].to_owned();
+
+            let rl = RawLog {
+                topics: log.topics,
+                data: log.data.0,
+            };
+
+            let parsed_sale_data = Ronin::transfer_events()
+                .get(&ContractType::MarketplaceV2)
+                .unwrap()
+                .parse_log(rl)
+                .unwrap();
+
+            let erc_transfer_log = tx
+                .logs
+                .iter()
+                .find(|c| contracts.contains(&self.to_string(&c.address).as_str()))
+                .unwrap()
+                .to_owned();
+
+            let erc_transfer = Ronin::transfer_events()
+                .get(&ContractType::ERC721)
+                .unwrap()
+                .parse_log(RawLog {
+                    topics: erc_transfer_log.topics,
+                    data: erc_transfer_log.data.0,
+                })
+                .unwrap();
+
+            Some(Sale {
+                seller: self.prefix(
+                    &self.to_string(&parsed_sale_data.params[1].value.to_string()),
+                    AddressPrefix::Ethereum,
+                ),
+                buyer: self.prefix(
+                    &self.to_string(&parsed_sale_data.params[2].value.to_string()),
+                    AddressPrefix::Ethereum,
+                ),
+                price: self.to_string(&parsed_sale_data.params[7].value.to_string()),
+                seller_received: self.to_string(&parsed_sale_data.params[8].value.to_string()),
+                token: self.to_string(&erc_transfer_log.address),
+                token_id: self.to_string(&erc_transfer.params[2].value.to_string()),
+                transaction_id: self.to_string(&tx.transaction_hash),
+            })
+        } else {
+            None
+        }
+        //
+        // for l in tx.logs.iter().map(|x| x.topics.iter()) {
+        //     println!("{:?}", l);
+        // }
+        // let f = TransactionId::Hash(primary_event_hash.into());
+        //
+        // let e = TransactionId::from_str(primary_event_hash).unwrap();
+        //
+        // let tx = ronin.provider.eth().transaction_receipt(web3::helpers::).await;
+        //
+        // let hash = match log
+        //     .topics
+        //     .iter()
+        //     .find(|t| web3::helpers::to_string(t).as_str() == primary_event_hash)
+        // {
+        //     None => return,
+        //     Some(data) => data,
+        // };
     }
 
     pub async fn stream(&self, offset: u64, replay: bool, empty_logs: bool) {
@@ -324,6 +501,7 @@ impl Ronin {
 
                 let mut tx_pool: Vec<Transaction> = vec![];
                 let mut erc_pool: Pool<ERCTransfer> = self.database.erc_transfers.get_pool();
+                let mut erc_sale_pool: Pool<Sale> = self.database.erc_sales.get_pool();
 
                 for tx in block.transactions {
                     let tx_from = self.to_string(&tx.from);
@@ -342,13 +520,22 @@ impl Ronin {
                         &tx_hash,
                     ));
 
-                    let receipt: web3::types::TransactionReceipt = self
+                    let receipt: TransactionReceipt = self
                         .provider
                         .eth()
                         .transaction_receipt(tx.hash)
                         .await
                         .expect("Failed to retrieve transaction receipt!")
                         .expect("Failed to unwrap transaction receipt!");
+
+                    if current_block > MARKETPLACE_V2_DEPLOY_BLOCK {
+                        match self.order_matched(&receipt).await {
+                            None => {}
+                            Some(sale) => {
+                                erc_sale_pool.insert(sale);
+                            }
+                        }
+                    }
 
                     if !receipt.logs.is_empty() {
                         for log in receipt.logs {
@@ -434,12 +621,17 @@ impl Ronin {
                 let wallet_update_num = wallet_pool.len();
 
                 erc_pool
-                    .commit(SessionBuilder::build(&self.database._client).await, true)
+                    .commit(true)
                     .await
                     .expect("Failed to insert erc transfers");
 
+                erc_sale_pool
+                    .commit(true)
+                    .await
+                    .expect("Failed to insert erc sales");
+
                 wallet_pool
-                    .commit(SessionBuilder::build(&self.database._client).await, true)
+                    .commit(true)
                     .await
                     .expect("Failed to update wallets");
 
