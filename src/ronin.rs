@@ -325,7 +325,9 @@ impl Ronin {
     }
 
     pub async fn order_matched(&self, tx: &TransactionReceipt) -> Option<Sale> {
-        if tx.logs[0].topics[0] == MARKETPLACE_V2_ORDER_MATCHED_TOPIC.parse().unwrap() {
+        if !tx.logs.is_empty()
+            && tx.logs[0].topics[0] == MARKETPLACE_V2_ORDER_MATCHED_TOPIC.parse().unwrap()
+        {
             let contracts: Vec<&str> = Ronin::contract_list()
                 .values()
                 .filter(|c| c.erc == ERC721)
