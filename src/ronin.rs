@@ -620,6 +620,7 @@ impl Ronin {
                     .ok();
 
                 let erc_insert_num = erc_pool.len();
+                let erc_sale_num = erc_sale_pool.len();
                 let wallet_update_num = wallet_pool.len();
 
                 erc_pool
@@ -638,16 +639,18 @@ impl Ronin {
                     .expect("Failed to update wallets");
 
                 println!(
-                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tWallet Updates: {:>5}",
+                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
                     &current_block,
                     num_txs,
                     erc_insert_num,
-                    wallet_update_num
+                    wallet_update_num,
+                    erc_sale_num
                 );
             } else if empty_logs {
                 println!(
-                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tWallet Updates: {:>5}",
+                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
                     &current_block,
+                    0,
                     0,
                     0,
                     0
