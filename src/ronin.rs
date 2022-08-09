@@ -426,7 +426,10 @@ impl Ronin {
                             price: self.to_string(&parsed_sale.params[4].value.to_string()),
                             seller_received: self
                                 .to_string(&parsed_sale.params[4].value.to_string()),
-                            token: self.to_string(&parsed_sale.params[3].value.to_string()),
+                            token: self.prefix(
+                                &self.to_string(&parsed_sale.params[3].value.to_string()),
+                                AddressPrefix::Ethereum,
+                            ),
                             token_id: self.to_string(&parsed_transfer.params[2].value.to_string()),
                             transaction_id: self.to_string(&tx.transaction_hash),
                         })
