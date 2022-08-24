@@ -10,8 +10,11 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use web3::ethabi::{Event, EventParam, ParamType, RawLog};
 use web3::transports::{Either, Http, WebSocket};
-use web3::types::{BlockId, BlockNumber, Log, TransactionReceipt};
+use web3::types::{BlockId, BlockNumber, Log, TransactionId, TransactionReceipt};
 use web3::Web3;
+use ParamType::{Address, FixedBytes, Uint};
+
+use ContractType::{LegacyErc721Sale, MarketplaceV2, ERC1155, ERC20, ERC721};
 
 use crate::mongo::collections::axie_sale::Sale;
 use crate::mongo::collections::transaction::Transaction;
@@ -19,7 +22,6 @@ use crate::mongo::collections::transaction_pool::Pool;
 use crate::mongo::collections::wallet::Wallet;
 use crate::mongo::collections::{erc_transfer::ERCTransfer, Block};
 use crate::mongo::Database;
-use crate::ronin::ContractType::ERC721;
 
 const ERC_TRANSFER_TOPIC: &str =
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
@@ -46,6 +48,7 @@ pub enum AddressPrefix {
 pub enum ContractType {
     ERC20,
     ERC721,
+    ERC1155,
     Unknown,
     MarketplaceV2,
     LegacyErc721Sale,
@@ -71,23 +74,23 @@ impl Ronin {
     pub fn transfer_events() -> HashMap<ContractType, Event> {
         let mut map: HashMap<ContractType, Event> = HashMap::new();
         map.insert(
-            ContractType::ERC20,
+            ERC20,
             Event {
                 name: "Transfer".to_string(),
                 inputs: vec![
                     EventParam {
                         name: "_from".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: true,
                     },
                     EventParam {
                         name: "_to".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: true,
                     },
                     EventParam {
                         name: "_value".to_string(),
-                        kind: ParamType::Uint(256),
+                        kind: Uint(256),
                         indexed: false,
                     },
                 ],
@@ -96,33 +99,33 @@ impl Ronin {
         );
 
         map.insert(
-            ContractType::LegacyErc721Sale,
+            LegacyErc721Sale,
             Event {
                 name: "AuctionSuccessful".to_string(),
                 inputs: vec![
                     EventParam {
                         name: "_seller".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: false,
                     },
                     EventParam {
                         name: "_buyer".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: false,
                     },
                     EventParam {
                         name: "_listingIndex".to_string(),
-                        kind: ParamType::Uint(256),
+                        kind: Uint(256),
                         indexed: false,
                     },
                     EventParam {
                         name: "_token".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: false,
                     },
                     EventParam {
                         name: "_totalPrice".to_string(),
-                        kind: ParamType::Uint(256),
+                        kind: Uint(256),
                         indexed: false,
                     },
                 ],
@@ -131,23 +134,23 @@ impl Ronin {
         );
 
         map.insert(
-            ContractType::ERC721,
+            ERC721,
             Event {
                 name: "Transfer".to_string(),
                 inputs: vec![
                     EventParam {
                         name: "_from".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: true,
                     },
                     EventParam {
                         name: "_to".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: true,
                     },
                     EventParam {
                         name: "_tokenId".to_string(),
-                        kind: ParamType::Uint(256),
+                        kind: Uint(256),
                         indexed: true,
                     },
                 ],
@@ -156,63 +159,63 @@ impl Ronin {
         );
 
         map.insert(
-            ContractType::MarketplaceV2,
+            MarketplaceV2,
             Event {
                 name: "OrderMatched".to_string(),
                 inputs: vec![
                     EventParam {
                         name: "hash".to_string(),
-                        kind: ParamType::FixedBytes(32),
+                        kind: FixedBytes(32),
                         indexed: false,
                     },
                     EventParam {
                         name: "maker".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: false,
                     },
                     EventParam {
                         name: "matcher".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: false,
                     },
                     EventParam {
                         name: "kind".to_string(),
-                        kind: ParamType::Uint(8),
+                        kind: Uint(8),
                         indexed: false,
                     },
                     EventParam {
                         name: "bidToken".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: false,
                     },
                     EventParam {
                         name: "bidPrice".to_string(),
-                        kind: ParamType::Uint(256),
+                        kind: Uint(256),
                         indexed: false,
                     },
                     EventParam {
                         name: "paymentToken".to_string(),
-                        kind: ParamType::Address,
+                        kind: Address,
                         indexed: false,
                     },
                     EventParam {
                         name: "settlePrice".to_string(),
-                        kind: ParamType::Uint(256),
+                        kind: Uint(256),
                         indexed: false,
                     },
                     EventParam {
                         name: "sellerReceived".to_string(),
-                        kind: ParamType::Uint(256),
+                        kind: Uint(256),
                         indexed: false,
                     },
                     EventParam {
                         name: "marketFeePercentage".to_string(),
-                        kind: ParamType::Uint(256),
+                        kind: Uint(256),
                         indexed: false,
                     },
                     EventParam {
                         name: "marketFeeTaken".to_string(),
-                        kind: ParamType::Uint(256),
+                        kind: Uint(256),
                         indexed: false,
                     },
                 ],
@@ -227,11 +230,31 @@ impl Ronin {
         let mut map: ContractList = ContractList::new();
 
         map.insert(
+            "0x814a9c959a3ef6ca44b5e2349e3bba9845393947",
+            Contract {
+                name: "CHARM",
+                decimals: 0,
+                erc: ERC1155,
+                address: "0x814a9c959a3ef6ca44b5e2349e3bba9845393947",
+            },
+        );
+
+        map.insert(
+            "0xc25970724f032af21d801978c73653c440cf787c",
+            Contract {
+                name: "RUNE",
+                decimals: 0,
+                erc: ERC1155,
+                address: "0xc25970724f032af21d801978c73653c440cf787c",
+            },
+        );
+
+        map.insert(
             "0xc99a6a985ed2cac1ef41640596c5a5f9f4e19ef5",
             Contract {
                 name: "WETH",
                 decimals: 18,
-                erc: ContractType::ERC20,
+                erc: ERC20,
                 address: "0xc99a6a985ed2cac1ef41640596c5a5f9f4e19ef5",
             },
         );
@@ -241,7 +264,7 @@ impl Ronin {
             Contract {
                 name: "AXS",
                 decimals: 18,
-                erc: ContractType::ERC20,
+                erc: ERC20,
                 address: "0xed4a9f48a62fb6fdcfb45bb00c9f61d1a436e58c",
             },
         );
@@ -251,7 +274,7 @@ impl Ronin {
             Contract {
                 name: "SLP",
                 decimals: 0,
-                erc: ContractType::ERC20,
+                erc: ERC20,
                 address: "0xa8754b9fa15fc18bb59458815510e40a12cd2014",
             },
         );
@@ -261,7 +284,7 @@ impl Ronin {
             Contract {
                 name: "AEC",
                 decimals: 0,
-                erc: ContractType::ERC20,
+                erc: ERC20,
                 address: "0x173a2d4fa585a63acd02c107d57f932be0a71bcc",
             },
         );
@@ -271,7 +294,7 @@ impl Ronin {
             Contract {
                 name: "USDC",
                 decimals: 18,
-                erc: ContractType::ERC20,
+                erc: ERC20,
                 address: "0x0b7007c13325c48911f73a2dad5fa5dcbf808adc",
             },
         );
@@ -281,7 +304,7 @@ impl Ronin {
             Contract {
                 name: "WRON",
                 decimals: 18,
-                erc: ContractType::ERC20,
+                erc: ERC20,
                 address: "0xe514d9deb7966c8be0ca922de8a064264ea6bcd4",
             },
         );
@@ -291,7 +314,7 @@ impl Ronin {
             Contract {
                 name: "AXIE",
                 decimals: 0,
-                erc: ContractType::ERC721,
+                erc: ERC721,
                 address: "0x32950db2a7164ae833121501c797d79e7b79d74c",
             },
         );
@@ -301,7 +324,7 @@ impl Ronin {
             Contract {
                 name: "LAND",
                 decimals: 0,
-                erc: ContractType::ERC721,
+                erc: ERC721,
                 address: "0x8c811e3c958e190f5ec15fb376533a3398620500",
             },
         );
@@ -311,7 +334,7 @@ impl Ronin {
             Contract {
                 name: "ITEM",
                 decimals: 0,
-                erc: ContractType::ERC721,
+                erc: ERC721,
                 address: "0xa96660f0e4a3e9bc7388925d245a6d4d79e21259",
             },
         );
@@ -333,6 +356,8 @@ impl Ronin {
             }
         }
     }
+
+    // pub fn transaction_receipt(&self, block: Block, transaction_hash: TransactionId)
 
     pub async fn new(hostname: &str, database: Database) -> Ronin {
         let parsed = Url::parse(hostname)
@@ -397,7 +422,7 @@ impl Ronin {
 
                     if !transfer_log.is_empty() {
                         let parsed_sale = Ronin::transfer_events()
-                            .get(&ContractType::LegacyErc721Sale)
+                            .get(&LegacyErc721Sale)
                             .unwrap()
                             .parse_log(RawLog {
                                 topics: sale_log[0].to_owned().topics,
@@ -406,7 +431,7 @@ impl Ronin {
                             .unwrap();
 
                         let parsed_transfer = Ronin::transfer_events()
-                            .get(&ContractType::ERC721)
+                            .get(&ERC721)
                             .unwrap()
                             .parse_log(RawLog {
                                 topics: transfer_log[0].to_owned().topics,
@@ -461,63 +486,52 @@ impl Ronin {
             };
 
             let parsed_sale_data = Ronin::transfer_events()
-                .get(&ContractType::MarketplaceV2)
+                .get(&MarketplaceV2)
                 .unwrap()
                 .parse_log(rl)
                 .unwrap();
 
-            let erc_transfer_log = tx
+            let erc_transfer_log_opt = match tx
                 .logs
                 .iter()
                 .find(|c| contracts.contains(&self.to_string(&c.address).as_str()))
-                .unwrap()
-                .to_owned();
+            {
+                None => None,
+                Some(log) => Some(log.to_owned()),
+            };
 
-            let erc_transfer = Ronin::transfer_events()
-                .get(&ContractType::ERC721)
-                .unwrap()
-                .parse_log(RawLog {
-                    topics: erc_transfer_log.topics,
-                    data: erc_transfer_log.data.0,
+            if erc_transfer_log_opt != None {
+                let erc_transfer_log = erc_transfer_log_opt.unwrap();
+                let erc_transfer = Ronin::transfer_events()
+                    .get(&ContractType::ERC721)
+                    .unwrap()
+                    .parse_log(RawLog {
+                        topics: erc_transfer_log.topics,
+                        data: erc_transfer_log.data.0,
+                    })
+                    .unwrap();
+
+                Some(Sale {
+                    seller: self.prefix(
+                        &self.to_string(&parsed_sale_data.params[1].value.to_string()),
+                        AddressPrefix::Ethereum,
+                    ),
+                    buyer: self.prefix(
+                        &self.to_string(&parsed_sale_data.params[2].value.to_string()),
+                        AddressPrefix::Ethereum,
+                    ),
+                    price: self.to_string(&parsed_sale_data.params[7].value.to_string()),
+                    seller_received: self.to_string(&parsed_sale_data.params[8].value.to_string()),
+                    token: self.to_string(&erc_transfer_log.address),
+                    token_id: self.to_string(&erc_transfer.params[2].value.to_string()),
+                    transaction_id: self.to_string(&tx.transaction_hash),
                 })
-                .unwrap();
-
-            Some(Sale {
-                seller: self.prefix(
-                    &self.to_string(&parsed_sale_data.params[1].value.to_string()),
-                    AddressPrefix::Ethereum,
-                ),
-                buyer: self.prefix(
-                    &self.to_string(&parsed_sale_data.params[2].value.to_string()),
-                    AddressPrefix::Ethereum,
-                ),
-                price: self.to_string(&parsed_sale_data.params[7].value.to_string()),
-                seller_received: self.to_string(&parsed_sale_data.params[8].value.to_string()),
-                token: self.to_string(&erc_transfer_log.address),
-                token_id: self.to_string(&erc_transfer.params[2].value.to_string()),
-                transaction_id: self.to_string(&tx.transaction_hash),
-            })
+            } else {
+                None
+            }
         } else {
             None
         }
-        //
-        // for l in tx.logs.iter().map(|x| x.topics.iter()) {
-        //     println!("{:?}", l);
-        // }
-        // let f = TransactionId::Hash(primary_event_hash.into());
-        //
-        // let e = TransactionId::from_str(primary_event_hash).unwrap();
-        //
-        // let tx = ronin.provider.eth().transaction_receipt(web3::helpers::).await;
-        //
-        // let hash = match log
-        //     .topics
-        //     .iter()
-        //     .find(|t| web3::helpers::to_string(t).as_str() == primary_event_hash)
-        // {
-        //     None => return,
-        //     Some(data) => data,
-        // };
     }
 
     pub async fn stream(&self, offset: u64, replay: bool, empty_logs: bool) {
@@ -790,7 +804,6 @@ impl Ronin {
                 .expect("Failed to store last_block!");
 
             current_block = current_block.add(1);
-
             if current_block >= stream_stop_block {
                 break;
             }

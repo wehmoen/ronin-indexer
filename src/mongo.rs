@@ -223,6 +223,7 @@ pub mod collections {
                     index_model("buyer", false),
                     index_model("token_id", false),
                     index_model("token", false),
+                    index_model("transaction_id", true),
                 ]
             }
 
