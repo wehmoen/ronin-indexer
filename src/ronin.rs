@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use web3::ethabi::{Event, EventParam, ParamType, RawLog};
 use web3::transports::{Either, Http, WebSocket};
-use web3::types::{BlockId, BlockNumber, Log, TransactionId, TransactionReceipt, H256};
+use web3::types::{BlockId, BlockNumber, Log, TransactionReceipt};
 use web3::Web3;
 use ParamType::{Address, FixedBytes, Uint};
 
@@ -530,19 +530,16 @@ impl Ronin {
                 .parse_log(rl)
                 .unwrap();
 
-            let erc_transfer_log_opt = match tx
+            let erc_transfer_log_opt = tx
                 .logs
                 .iter()
                 .find(|c| contracts.contains(&self.to_string(&c.address).as_str()))
-            {
-                None => None,
-                Some(log) => Some(log.to_owned()),
-            };
+                .map(|log| log.to_owned());
 
             if erc_transfer_log_opt != None {
                 let erc_transfer_log = erc_transfer_log_opt.unwrap();
                 let erc_transfer = Ronin::transfer_events()
-                    .get(&ContractType::ERC721)
+                    .get(&ERC721)
                     .unwrap()
                     .parse_log(RawLog {
                         topics: erc_transfer_log.topics,
@@ -756,7 +753,7 @@ impl Ronin {
                                     let contract_address = self.to_string(&log.address);
                                     match contracts.get(&contract_address.as_str()) {
                                         None => continue,
-                                        Some(contract) => {
+                                        Some(_) => {
                                             let event_data = transfer_events
                                                 .get(&ERC1155)
                                                 .unwrap()
@@ -782,7 +779,7 @@ impl Ronin {
                                             let value = self
                                                 .to_string(&event_data.params[4].value.to_string());
 
-                                            let signature = ERCTransfer::get_transfer_id(
+                                            let signature = ERC1155Transfer::get_transfer_id(
                                                 &self.to_string(&log.transaction_hash),
                                                 &self.to_string(&log.log_index),
                                             );
