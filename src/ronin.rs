@@ -38,6 +38,8 @@ const MARKETPLACE_AXIE_SALE_TOPIC: &str =
 const ERC1155_TRANSFER_SINGLE_TOPIC: &str =
     "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62";
 
+const ERC1155_DEPLOY_BLOCK: Block = 16171588;
+
 pub struct Ronin {
     database: Database,
     pub provider: Web3<Either<WebSocket, Http>>,
@@ -740,62 +742,69 @@ impl Ronin {
 
                     if !receipt.logs.is_empty() {
                         for log in receipt.logs {
-                            match &log.topics.clone().into_iter().find(|t| {
-                                self.to_string(t).as_str() == ERC1155_TRANSFER_SINGLE_TOPIC
-                            }) {
-                                None => {}
-                                Some(_) => {
-                                    let raw_log = RawLog {
-                                        topics: log.topics.clone(),
-                                        data: log.data.0.clone(),
-                                    };
+                            if current_block > ERC1155_DEPLOY_BLOCK {
+                                match &log.topics.clone().into_iter().find(|t| {
+                                    self.to_string(t).as_str() == ERC1155_TRANSFER_SINGLE_TOPIC
+                                }) {
+                                    None => {}
+                                    Some(_) => {
+                                        let raw_log = RawLog {
+                                            topics: log.topics.clone(),
+                                            data: log.data.0.clone(),
+                                        };
 
-                                    let contract_address = self.to_string(&log.address);
-                                    match contracts.get(&contract_address.as_str()) {
-                                        None => continue,
-                                        Some(_) => {
-                                            let event_data = transfer_events
-                                                .get(&ERC1155)
-                                                .unwrap()
-                                                .to_owned()
-                                                .parse_log(raw_log)
-                                                .expect("Failed to parsed transaction log!");
+                                        let contract_address = self.to_string(&log.address);
+                                        match contracts.get(&contract_address.as_str()) {
+                                            None => continue,
+                                            Some(_) => {
+                                                let event_data = transfer_events
+                                                    .get(&ERC1155)
+                                                    .unwrap()
+                                                    .to_owned()
+                                                    .parse_log(raw_log)
+                                                    .expect("Failed to parsed transaction log!");
 
-                                            let operator = self
-                                                .to_string(&event_data.params[0].value.to_string());
-                                            let operator = f!("0x{operator}");
+                                                let operator = self.to_string(
+                                                    &event_data.params[0].value.to_string(),
+                                                );
+                                                let operator = f!("0x{operator}");
 
-                                            let from = self
-                                                .to_string(&event_data.params[1].value.to_string());
-                                            let from = f!("0x{from}");
+                                                let from = self.to_string(
+                                                    &event_data.params[1].value.to_string(),
+                                                );
+                                                let from = f!("0x{from}");
 
-                                            let to = self
-                                                .to_string(&event_data.params[2].value.to_string());
-                                            let to = f!("0x{to}");
+                                                let to = self.to_string(
+                                                    &event_data.params[2].value.to_string(),
+                                                );
+                                                let to = f!("0x{to}");
 
-                                            let token_id = self
-                                                .to_string(&event_data.params[3].value.to_string());
+                                                let token_id = self.to_string(
+                                                    &event_data.params[3].value.to_string(),
+                                                );
 
-                                            let value = self
-                                                .to_string(&event_data.params[4].value.to_string());
+                                                let value = self.to_string(
+                                                    &event_data.params[4].value.to_string(),
+                                                );
 
-                                            let signature = ERC1155Transfer::get_transfer_id(
-                                                &self.to_string(&log.transaction_hash),
-                                                &self.to_string(&log.log_index),
-                                            );
+                                                let signature = ERC1155Transfer::get_transfer_id(
+                                                    &self.to_string(&log.transaction_hash),
+                                                    &self.to_string(&log.log_index),
+                                                );
 
-                                            erc1155_pool.insert(ERC1155Transfer {
-                                                operator,
-                                                from,
-                                                to,
-                                                token_id,
-                                                value,
-                                                block: block_number,
-                                                transaction_id: self
-                                                    .to_string(&log.transaction_hash),
-                                                log_index: self.to_string(&log.log_index),
-                                                log_id: signature,
-                                            })
+                                                erc1155_pool.insert(ERC1155Transfer {
+                                                    operator,
+                                                    from,
+                                                    to,
+                                                    token_id,
+                                                    value,
+                                                    block: block_number,
+                                                    transaction_id: self
+                                                        .to_string(&log.transaction_hash),
+                                                    log_index: self.to_string(&log.log_index),
+                                                    log_id: signature,
+                                                })
+                                            }
                                         }
                                     }
                                 }
