@@ -290,6 +290,7 @@ pub mod collections {
 
         #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
         pub struct ERC1155Transfer {
+            pub token: Address,
             pub operator: Address,
             pub from: Address,
             pub to: Address,

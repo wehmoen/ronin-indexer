@@ -793,6 +793,7 @@ impl Ronin {
                                                 );
 
                                                 erc1155_pool.insert(ERC1155Transfer {
+                                                    token: contract_address,
                                                     operator,
                                                     from,
                                                     to,
