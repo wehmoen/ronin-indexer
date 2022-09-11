@@ -37,6 +37,18 @@ pub struct Args {
     /// Disable logging of wallet updates
     #[clap(short = 'w', long, value_parser, default_value_t = true)]
     pub debug_disable_wallet_updates: bool,
+    /// Feature: ERC Transfers
+    #[clap(long, value_parser, default_value_t = true)]
+    pub feature_erc_transfers: bool,
+    /// Feature: ERC 721 Sales
+    #[clap(long, value_parser, default_value_t = true)]
+    pub feature_erc_721_sales: bool,
+    /// Feature: Transactions
+    #[clap(long, value_parser, default_value_t = true)]
+    pub feature_transactions: bool,
+    /// Feature: Wallet Updates
+    #[clap(long, value_parser, default_value_t = false)]
+    pub feature_wallet_updates: bool,
 }
 
 pub fn parse() -> Args {
