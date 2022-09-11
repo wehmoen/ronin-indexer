@@ -186,6 +186,7 @@ pub mod collections {
     }
 
     pub mod axie_sale {
+        use mongodb::bson::DateTime;
         use mongodb::Collection;
         use serde::{Deserialize, Serialize};
 
@@ -202,6 +203,7 @@ pub mod collections {
             pub token: Address,
             pub token_id: String,
             pub transaction_id: String,
+            pub created_at: DateTime,
         }
 
         pub struct SaleProvider {
@@ -225,6 +227,7 @@ pub mod collections {
                     index_model("buyer", false),
                     index_model("token_id", false),
                     index_model("token", false),
+                    index_model("created_at", false),
                     index_model("transaction_id", true),
                 ]
             }

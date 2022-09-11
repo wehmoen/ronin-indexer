@@ -16,6 +16,7 @@ use ParamType::{Address, FixedBytes, Uint};
 
 use ContractType::{LegacyErc721Sale, MarketplaceV2, ERC1155, ERC20, ERC721};
 
+use crate::cli_args::Args;
 use crate::mongo::collections::axie_sale::Sale;
 use crate::mongo::collections::erc1155_transfer::ERC1155Transfer;
 use crate::mongo::collections::transaction::Transaction;
@@ -39,6 +40,12 @@ const ERC1155_TRANSFER_SINGLE_TOPIC: &str =
     "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62";
 
 const ERC1155_DEPLOY_BLOCK: Block = 16171588;
+
+const ERC721_TOKEN: [&str; 3] = [
+    "0xcbb5cc4b59a6993d6fb1ac439761dd5bf751a8c2",
+    "0xa96660f0e4a3e9bc7388925d245a6d4d79e21259",
+    "ronin:8c811e3c958e190f5ec15fb376533a3398620500",
+];
 
 pub struct Ronin {
     database: Database,
@@ -480,6 +487,14 @@ impl Ronin {
                             })
                             .unwrap();
 
+                        let block_data = self
+                            .provider
+                            .eth()
+                            .block(BlockId::Number(BlockNumber::from(tx.block_number.unwrap())))
+                            .await
+                            .unwrap()
+                            .unwrap();
+
                         Some(Sale {
                             seller: self.prefix(
                                 &self.to_string(&parsed_sale.params[0].value.to_string()),
@@ -498,6 +513,9 @@ impl Ronin {
                             ),
                             token_id: self.to_string(&parsed_transfer.params[2].value.to_string()),
                             transaction_id: self.to_string(&tx.transaction_hash),
+                            created_at: DateTime::from_millis(
+                                block_data.timestamp.as_u64() as i64 * 1000,
+                            ),
                         })
                     } else {
                         None
@@ -509,71 +527,105 @@ impl Ronin {
         }
     }
 
-    pub async fn order_matched(&self, tx: &TransactionReceipt) -> Option<Sale> {
-        if !tx.logs.is_empty()
-            && tx.logs[0].topics[0] == MARKETPLACE_V2_ORDER_MATCHED_TOPIC.parse().unwrap()
-        {
-            let contracts: Vec<&str> = Ronin::contract_list()
-                .values()
-                .filter(|c| c.erc == ERC721)
-                .map(|c| c.address)
-                .collect();
+    fn has_order_matched(&self, logs: &Vec<Log>) -> Option<Log> {
+        let log = logs
+            .iter()
+            .filter(|l| l.topics[0] == MARKETPLACE_V2_ORDER_MATCHED_TOPIC.parse().unwrap())
+            .collect::<Vec<&Log>>();
+        let log = log.first();
 
-            let log = tx.logs[0].to_owned();
-
-            let rl = RawLog {
-                topics: log.topics,
-                data: log.data.0,
-            };
-
-            let parsed_sale_data = Ronin::transfer_events()
-                .get(&MarketplaceV2)
-                .unwrap()
-                .parse_log(rl)
-                .unwrap();
-
-            let erc_transfer_log_opt = tx
-                .logs
-                .iter()
-                .find(|c| contracts.contains(&self.to_string(&c.address).as_str()))
-                .map(|log| log.to_owned());
-
-            if erc_transfer_log_opt != None {
-                let erc_transfer_log = erc_transfer_log_opt.unwrap();
-                let erc_transfer = Ronin::transfer_events()
-                    .get(&ERC721)
-                    .unwrap()
-                    .parse_log(RawLog {
-                        topics: erc_transfer_log.topics,
-                        data: erc_transfer_log.data.0,
-                    })
-                    .unwrap();
-
-                Some(Sale {
-                    seller: self.prefix(
-                        &self.to_string(&parsed_sale_data.params[1].value.to_string()),
-                        AddressPrefix::Ethereum,
-                    ),
-                    buyer: self.prefix(
-                        &self.to_string(&parsed_sale_data.params[2].value.to_string()),
-                        AddressPrefix::Ethereum,
-                    ),
-                    price: self.to_string(&parsed_sale_data.params[7].value.to_string()),
-                    seller_received: self.to_string(&parsed_sale_data.params[8].value.to_string()),
-                    token: self.to_string(&erc_transfer_log.address),
-                    token_id: self.to_string(&erc_transfer.params[2].value.to_string()),
-                    transaction_id: self.to_string(&tx.transaction_hash),
-                })
-            } else {
-                None
-            }
-        } else {
-            None
+        match log {
+            None => None,
+            Some(l) => Some(l.clone().to_owned()),
         }
     }
 
-    pub async fn stream(&self, offset: u64, replay: bool, empty_logs: bool) {
-        if replay {
+    pub async fn order_matched(&self, tx: &TransactionReceipt) -> Option<Sale> {
+        if !tx.logs.is_empty() {
+            if let Some(matched_order) = self.has_order_matched(&tx.logs) {
+                let contracts: Vec<&str> = Ronin::contract_list()
+                    .values()
+                    .filter(|c| c.erc == ERC721)
+                    .map(|c| c.address)
+                    .collect();
+
+                let rl = RawLog {
+                    topics: matched_order.topics,
+                    data: matched_order.data.0,
+                };
+                let parsed_sale_data = Ronin::transfer_events()
+                    .get(&MarketplaceV2)
+                    .unwrap()
+                    .parse_log(rl)
+                    .unwrap();
+
+                let erc_transfer_log_opt = tx
+                    .logs
+                    .iter()
+                    .find(|c| contracts.contains(&self.to_string(&c.address).as_str()))
+                    .map(|log| log.to_owned());
+
+                if erc_transfer_log_opt != None {
+                    let erc_transfer_log = erc_transfer_log_opt.unwrap();
+                    let erc_transfer = Ronin::transfer_events()
+                        .get(&ERC721)
+                        .unwrap()
+                        .parse_log(RawLog {
+                            topics: erc_transfer_log.topics,
+                            data: erc_transfer_log.data.0,
+                        })
+                        .unwrap();
+
+                    let block_data = self
+                        .provider
+                        .eth()
+                        .block(BlockId::Number(BlockNumber::from(tx.block_number.unwrap())))
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    Some(Sale {
+                        seller: self.prefix(
+                            &self.to_string(&parsed_sale_data.params[1].value.to_string()),
+                            AddressPrefix::Ethereum,
+                        ),
+                        buyer: self.prefix(
+                            &self.to_string(&parsed_sale_data.params[2].value.to_string()),
+                            AddressPrefix::Ethereum,
+                        ),
+                        price: self.to_string(&parsed_sale_data.params[7].value.to_string()),
+                        seller_received: self
+                            .to_string(&parsed_sale_data.params[8].value.to_string()),
+                        token: self.to_string(&erc_transfer_log.address),
+                        token_id: self.to_string(&erc_transfer.params[2].value.to_string()),
+                        transaction_id: self.to_string(&tx.transaction_hash),
+                        created_at: DateTime::from_millis(
+                            block_data.timestamp.as_u64() as i64 * 1000,
+                        ),
+                    })
+                } else {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    }
+
+    pub async fn stream(&self, offset: u64, args: Args) {
+        if args.debug {
+            println!("W A R N I N G");
+            println!("DEBUG MODE ENABLED! NOT SAVING ANYTHING TO DATABASE!");
+            println!("Start Block: {}", args.debug_start_block);
+            println!("Stop Block: {}", args.debug_stop_block);
+            thread::sleep(Duration::new(1, 0));
+        }
+
+        if args.replay {
+            if args.debug {
+                panic!("Can't replay while in debug mode!!!");
+            }
             println!("W A R N I N G");
             println!("About to drop ANY data stored in the database for this app!");
             println!("Waiting 15 seconds...");
@@ -615,20 +667,6 @@ impl Ronin {
         let contracts = Ronin::contract_list();
         let transfer_events = Ronin::transfer_events();
 
-        // let hash: H256 = "0x1fdc95652c9117087c7e38151e988d9b1128e1b9cf3f389ee35823da5055f9d0"
-        //     .parse()
-        //     .unwrap();
-        //
-        // let tx = self
-        //     .provider
-        //     .eth()
-        //     .transaction_receipt(hash)
-        //     .await
-        //     .unwrap()
-        //     .unwrap();
-        //
-        // println!("{:?}", tx.logs);
-
         let chain_head_block = self
             .provider
             .eth()
@@ -636,13 +674,21 @@ impl Ronin {
             .await
             .expect("Failed to retrieve head block number from chain!");
 
-        let stream_stop_block: Block = chain_head_block.as_u64() - offset;
+        let mut stream_stop_block: Block = chain_head_block.as_u64() - offset;
+
+        if args.debug {
+            stream_stop_block = args.debug_stop_block;
+        }
 
         let start = self.database.settings.get("last_block").await;
-        let start: Block = match start {
+        let mut start: Block = match start {
             None => 1,
             Some(settings) => settings.value.parse::<u64>().unwrap(),
         };
+
+        if args.debug {
+            start = args.debug_start_block;
+        }
 
         let mut largest_block_by_tx_num: LargestBlock =
             match self.database.settings.get("largest_block_by_tx_num").await {
@@ -678,7 +724,7 @@ impl Ronin {
             let num_txs = block.transactions.len();
 
             if num_txs > 0 {
-                if num_txs as u64 > largest_block_by_tx_num.tx_num {
+                if !args.debug && num_txs as u64 > largest_block_by_tx_num.tx_num {
                     largest_block_by_tx_num = LargestBlock {
                         number: block_number,
                         tx_num: num_txs as u64,
@@ -710,6 +756,17 @@ impl Ronin {
                         &tx_hash,
                     ));
 
+                    if args.debug && !args.debug_disable_wallet_updates {
+                        println!(
+                            "[WALLET UPDATE] Address: {}\tBlock: {:>14}\tTransaction: {}",
+                            &tx_from, &block_number, &tx_hash
+                        );
+                        println!(
+                            "[WALLET UPDATE] Address: {}\tBlock: {:>14}\tTransaction: {}",
+                            &tx_to, &block_number, &tx_hash
+                        );
+                    }
+
                     wallet_pool.update(self.database.wallets.update(
                         &tx_to,
                         block_number,
@@ -728,6 +785,9 @@ impl Ronin {
                         match self.order_matched(&receipt).await {
                             None => {}
                             Some(sale) => {
+                                if args.debug {
+                                    println!("[MARKETPLACE V2 SALE] {:#?}", sale);
+                                }
                                 erc_sale_pool.insert(sale);
                             }
                         }
@@ -735,6 +795,9 @@ impl Ronin {
                         match self.legacy_erc_sale(&receipt).await {
                             None => {}
                             Some(sale) => {
+                                if args.debug {
+                                    println!("[MARKETPLACE SALE] {:#?}", sale);
+                                }
                                 erc_sale_pool.insert(sale);
                             }
                         }
@@ -792,7 +855,7 @@ impl Ronin {
                                                     &self.to_string(&log.log_index),
                                                 );
 
-                                                erc1155_pool.insert(ERC1155Transfer {
+                                                let transfer = ERC1155Transfer {
                                                     token: contract_address,
                                                     operator,
                                                     from,
@@ -804,7 +867,12 @@ impl Ronin {
                                                         .to_string(&log.transaction_hash),
                                                     log_index: self.to_string(&log.log_index),
                                                     log_id: signature,
-                                                })
+                                                };
+                                                if args.debug {
+                                                    println!("[ERC1155 Transfer] {:#?}", transfer);
+                                                }
+
+                                                erc1155_pool.insert(transfer)
                                             }
                                         }
                                     }
@@ -824,45 +892,57 @@ impl Ronin {
                                         data: log.data.0,
                                     };
 
-                                    let contract_address = self.to_string(&log.address);
+                                    if ERC721_TOKEN
+                                        .contains(&self.to_string(&raw_log.topics[1]).as_str())
+                                    {
+                                        let contract_address = self.to_string(&log.address);
 
-                                    match contracts.get(&contract_address.as_str()) {
-                                        None => continue,
-                                        Some(contract) => {
-                                            let event_data = transfer_events
-                                                .get(&contract.erc)
-                                                .unwrap()
-                                                .to_owned()
-                                                .parse_log(raw_log)
-                                                .expect("Failed to parsed transaction log!");
+                                        match contracts.get(&contract_address.as_str()) {
+                                            None => continue,
+                                            Some(contract) => {
+                                                let event_data = transfer_events
+                                                    .get(&contract.erc)
+                                                    .unwrap()
+                                                    .to_owned()
+                                                    .parse_log(raw_log)
+                                                    .expect("Failed to parsed transaction log!");
 
-                                            let from = self
-                                                .to_string(&event_data.params[0].value.to_string());
-                                            let from = f!("0x{from}");
+                                                let from = self.to_string(
+                                                    &event_data.params[0].value.to_string(),
+                                                );
+                                                let from = f!("0x{from}");
 
-                                            let to = self
-                                                .to_string(&event_data.params[1].value.to_string());
-                                            let to = f!("0x{to}");
+                                                let to = self.to_string(
+                                                    &event_data.params[1].value.to_string(),
+                                                );
+                                                let to = f!("0x{to}");
 
-                                            let signature = ERCTransfer::get_transfer_id(
-                                                &self.to_string(&log.transaction_hash),
-                                                &self.to_string(&log.log_index),
-                                            );
+                                                let signature = ERCTransfer::get_transfer_id(
+                                                    &self.to_string(&log.transaction_hash),
+                                                    &self.to_string(&log.log_index),
+                                                );
 
-                                            erc_pool.insert(ERCTransfer {
-                                                from,
-                                                to,
-                                                token: contract_address.to_owned(),
-                                                value_or_token_id: self.to_string(
-                                                    &event_data.params[2].value.to_string(),
-                                                ),
-                                                block: block_number,
-                                                transaction_id: self
-                                                    .to_string(&log.transaction_hash),
-                                                erc: contract.erc.to_owned(),
-                                                log_index: self.to_string(&log.log_index),
-                                                log_id: signature,
-                                            });
+                                                let transfer = ERCTransfer {
+                                                    from,
+                                                    to,
+                                                    token: contract_address.to_owned(),
+                                                    value_or_token_id: self.to_string(
+                                                        &event_data.params[2].value.to_string(),
+                                                    ),
+                                                    block: block_number,
+                                                    transaction_id: self
+                                                        .to_string(&log.transaction_hash),
+                                                    erc: contract.erc.to_owned(),
+                                                    log_index: self.to_string(&log.log_index),
+                                                    log_id: signature,
+                                                };
+
+                                                if args.debug {
+                                                    println!("[ERC Transfer] {:#?}", transfer);
+                                                }
+
+                                                erc_pool.insert(transfer);
+                                            }
                                         }
                                     }
                                 }
@@ -882,48 +962,52 @@ impl Ronin {
                     });
                 }
 
-                self.database
-                    .transactions
-                    .collection
-                    .insert_many(&tx_pool, None)
-                    .await
-                    .ok();
+                if !args.debug {
+                    self.database
+                        .transactions
+                        .collection
+                        .insert_many(&tx_pool, None)
+                        .await
+                        .ok();
+                }
 
                 let erc_insert_num = erc_pool.len();
                 let erc1155_insert_num = erc1155_pool.len();
                 let erc_sale_num = erc_sale_pool.len();
                 let wallet_update_num = wallet_pool.len();
 
-                erc_pool
-                    .commit(true)
-                    .await
-                    .expect("Failed to insert erc transfers");
+                if !args.debug {
+                    erc_pool
+                        .commit(true)
+                        .await
+                        .expect("Failed to insert erc transfers");
 
-                erc1155_pool
-                    .commit(true)
-                    .await
-                    .expect("Failed to insert erc 1155 transfers");
+                    erc1155_pool
+                        .commit(true)
+                        .await
+                        .expect("Failed to insert erc 1155 transfers");
 
-                erc_sale_pool
-                    .commit(true)
-                    .await
-                    .expect("Failed to insert erc sales");
+                    erc_sale_pool
+                        .commit(true)
+                        .await
+                        .expect("Failed to insert erc sales");
 
-                wallet_pool
-                    .commit(true)
-                    .await
-                    .expect("Failed to update wallets");
+                    wallet_pool
+                        .commit(true)
+                        .await
+                        .expect("Failed to update wallets");
 
-                println!(
-                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
-                    &current_block,
-                    num_txs,
-                    erc_insert_num,
-                    erc1155_insert_num,
-                    wallet_update_num,
-                    erc_sale_num
-                );
-            } else if empty_logs {
+                    println!(
+                        "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
+                        &current_block,
+                        num_txs,
+                        erc_insert_num,
+                        erc1155_insert_num,
+                        wallet_update_num,
+                        erc_sale_num
+                    );
+                }
+            } else if args.empty_logs && !args.debug {
                 println!(
                     "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
                     &current_block,
@@ -935,13 +1019,16 @@ impl Ronin {
                 );
             }
 
-            self.database
-                .settings
-                .set("last_block", current_block.to_string())
-                .await
-                .expect("Failed to store last_block!");
+            if !args.debug {
+                self.database
+                    .settings
+                    .set("last_block", current_block.to_string())
+                    .await
+                    .expect("Failed to store last_block!");
+            }
 
-            current_block = current_block.add(1);
+            current_block += 1;
+
             if current_block >= stream_stop_block {
                 break;
             }
