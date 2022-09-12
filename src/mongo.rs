@@ -418,6 +418,7 @@ pub mod collections {
         }
     }
     pub mod transaction_pool {
+        use log::error;
         use mongodb::bson::Document;
         use mongodb::error::Error;
         use mongodb::options::{InsertManyOptions, UpdateOptions};
@@ -511,7 +512,7 @@ pub mod collections {
                         {
                             Ok(_) => {}
                             Err(error) => {
-                                println!("Failed to upsert {:?} with error {:?}", update, error);
+                                error!("Failed to upsert {:?} with error {:?}", update, error);
                             }
                         }
                     }

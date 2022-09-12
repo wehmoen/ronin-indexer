@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
+use log::{debug, error, info, log, warn};
 use mongodb::bson::{doc, DateTime};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -473,7 +474,7 @@ impl Ronin {
                 Either::Right(Http::new(hostname).expect("Failed to connect to http provider!"))
             }
             "https" => {
-                println!("[WARN] Consider using http as protocol for better performance!");
+                warn!("Consider using http as protocol for better performance!");
                 Either::Right(Http::new(hostname).expect("Failed to connect to http provider!"))
             }
             _ => panic!("Invalid provider type"),
@@ -667,20 +668,20 @@ impl Ronin {
 
     pub async fn stream(&self, offset: u64, args: Args) {
         if args.debug {
-            println!("W A R N I N G");
-            println!("DEBUG MODE ENABLED! NOT SAVING ANYTHING TO DATABASE!");
-            println!("Start Block: {}", args.debug_start_block);
-            println!("Stop Block: {}", args.debug_stop_block);
+            debug!("W A R N I N G");
+            debug!("DEBUG MODE ENABLED! NOT SAVING ANYTHING TO DATABASE!");
+            debug!("Start Block: {}", args.debug_start_block);
+            debug!("Stop Block: {}", args.debug_stop_block);
             thread::sleep(Duration::new(1, 0));
         }
 
         if args.replay {
             if args.debug {
-                panic!("Can't replay while in debug mode!!!");
+                debug!("Can't replay while in debug mode!!!");
             }
-            println!("W A R N I N G");
-            println!("About to drop ANY data stored in the database for this app!");
-            println!("Waiting 15 seconds...");
+            debug!("W A R N I N G");
+            debug!("About to drop ANY data stored in the database for this app!");
+            debug!("Waiting 15 seconds...");
             thread::sleep(Duration::new(15, 0));
             self.database
                 .settings
@@ -752,11 +753,11 @@ impl Ronin {
             };
 
         if start > stream_stop_block {
-            println!("[INFO] Offset not large enough. Exiting!");
+            info!("[INFO] Offset not large enough. Exiting!");
             return;
         }
 
-        println!("[INFO] Streaming from {} to {}", &start, &stream_stop_block);
+        info!("[INFO] Streaming from {} to {}", &start, &stream_stop_block);
 
         let mut current_block: Block = start.to_owned();
         let mut wallet_pool: Pool<Wallet> = self.database.wallets.get_pool();
@@ -816,11 +817,11 @@ impl Ronin {
                     }
 
                     if args.debug && !args.debug_disable_wallet_updates {
-                        println!(
+                        debug!(
                             "[WALLET UPDATE] Address: {}\tBlock: {:>14}\tTransaction: {}",
                             &tx_from, &block_number, &tx_hash
                         );
-                        println!(
+                        debug!(
                             "[WALLET UPDATE] Address: {}\tBlock: {:>14}\tTransaction: {}",
                             &tx_to, &block_number, &tx_hash
                         );
@@ -840,7 +841,7 @@ impl Ronin {
                                 None => {}
                                 Some(sale) => {
                                     if args.debug {
-                                        println!("[MARKETPLACE V2 SALE] {:#?}", sale);
+                                        debug!("[MARKETPLACE V2 SALE] {:#?}", sale);
                                     }
                                     erc_sale_pool.insert(sale);
                                 }
@@ -850,7 +851,7 @@ impl Ronin {
                                 None => {}
                                 Some(sale) => {
                                     if args.debug {
-                                        println!("[MARKETPLACE SALE] {:#?}", sale);
+                                        debug!("[MARKETPLACE SALE] {:#?}", sale);
                                     }
                                     erc_sale_pool.insert(sale);
                                 }
@@ -928,7 +929,7 @@ impl Ronin {
                                                         log_id: signature,
                                                     };
                                                     if args.debug {
-                                                        println!(
+                                                        debug!(
                                                             "[ERC1155 Transfer] {:#?}",
                                                             transfer
                                                         );
@@ -997,7 +998,7 @@ impl Ronin {
                                                 };
 
                                                 if args.debug {
-                                                    println!("[ERC Transfer] {:#?}", transfer);
+                                                    debug!("[ERC Transfer] {:#?}", transfer);
                                                 }
 
                                                 erc_pool.insert(transfer);
@@ -1064,7 +1065,7 @@ impl Ronin {
                             .expect("Failed to update wallets");
                     }
 
-                    println!(
+                    info!(
                         "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
                         &current_block,
                         num_txs,
@@ -1075,7 +1076,7 @@ impl Ronin {
                     );
                 }
             } else if args.empty_logs && !args.debug {
-                println!(
+                info!(
                     "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
                     &current_block,
                     0,
