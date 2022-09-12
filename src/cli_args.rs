@@ -2,7 +2,7 @@ use clap::Parser;
 use std::fmt::Debug;
 
 /// Better Ronin blockchain indexer
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[clap(author = "wehmoen#0001", version, about, long_about = None)]
 pub struct Args {
     /// MongoDB connection URL

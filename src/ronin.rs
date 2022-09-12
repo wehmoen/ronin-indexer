@@ -669,7 +669,7 @@ impl Ronin {
         }
     }
 
-    pub async fn stream(&self, offset: u64, args: Args) {
+    pub async fn stream(&self, offset: u64, args: Args, start: Block, stop: Block) {
         if args.debug {
             debug!("W A R N I N G");
             debug!("DEBUG MODE ENABLED! NOT SAVING ANYTHING TO DATABASE!");
@@ -730,21 +730,7 @@ impl Ronin {
             .await
             .expect("Failed to retrieve head block number from chain!");
 
-        let mut stream_stop_block: Block = chain_head_block.as_u64() - offset;
-
-        if args.debug {
-            stream_stop_block = args.debug_stop_block;
-        }
-
-        let start = self.database.settings.get("last_block").await;
-        let mut start: Block = match start {
-            None => 1,
-            Some(settings) => settings.value.parse::<u64>().unwrap(),
-        };
-
-        if args.debug {
-            start = args.debug_start_block;
-        }
+        let mut stream_stop_block: Block = stop;
 
         let mut largest_block_by_tx_num: LargestBlock =
             match self.database.settings.get("largest_block_by_tx_num").await {
