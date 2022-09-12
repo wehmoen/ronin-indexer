@@ -570,6 +570,7 @@ impl Ronin {
                             created_at: DateTime::from_millis(
                                 block_data.timestamp.as_u64() as i64 * 1000,
                             ),
+                            block: tx.block_number.unwrap().as_u64(),
                         })
                     } else {
                         None
@@ -655,6 +656,7 @@ impl Ronin {
                         created_at: DateTime::from_millis(
                             block_data.timestamp.as_u64() as i64 * 1000,
                         ),
+                        block: tx.block_number.unwrap().as_u64(),
                     })
                 } else {
                     return None;

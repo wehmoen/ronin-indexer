@@ -191,7 +191,7 @@ pub mod collections {
         use serde::{Deserialize, Serialize};
 
         use crate::mongo::collections::transaction_pool::Pool;
-        use crate::mongo::collections::Address;
+        use crate::mongo::collections::{Address, Block};
         use crate::mongo::{index_model, IndexModel, Indexable};
 
         #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -204,6 +204,7 @@ pub mod collections {
             pub token_id: String,
             pub transaction_id: String,
             pub created_at: DateTime,
+            pub block: Block,
         }
 
         pub struct SaleProvider {
@@ -385,6 +386,7 @@ pub mod collections {
                     index_model("from", false),
                     index_model("to", false),
                     index_model("token", false),
+                    index_model("block", false),
                     index_model("value_or_token_id", false),
                     index_model("block", false),
                     index_model("transaction_id", false),
