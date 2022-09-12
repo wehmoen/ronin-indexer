@@ -4,7 +4,8 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-use log::{debug, error, info, log, warn};
+use log::Level::Info;
+use log::{debug, info, log_enabled, warn};
 use mongodb::bson::{doc, DateTime};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -1065,7 +1066,8 @@ impl Ronin {
                             .expect("Failed to update wallets");
                     }
 
-                    info!(
+                    if log_enabled!(Info) {
+                        info!(
                         "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
                         &current_block,
                         num_txs,
@@ -1074,9 +1076,23 @@ impl Ronin {
                         wallet_update_num,
                         erc_sale_num
                     );
+                    } else {
+                        if current_block.rem_euclid(100) == 0 {
+                            println!(
+                                "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
+                                &current_block,
+                                num_txs,
+                                erc_insert_num,
+                                erc1155_insert_num,
+                                wallet_update_num,
+                                erc_sale_num
+                            );
+                        }
+                    }
                 }
             } else if args.empty_logs && !args.debug {
-                info!(
+                if log_enabled!(Info) {
+                    info!(
                     "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
                     &current_block,
                     0,
@@ -1085,6 +1101,17 @@ impl Ronin {
                     0,
                     0
                 );
+                } else {
+                    println!(
+                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
+                    &current_block,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                );
+                }
             }
 
             if !args.debug {
