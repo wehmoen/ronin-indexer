@@ -10,8 +10,6 @@ mod ronin;
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
-
     let args = cli_args::parse();
 
     let default_log_level = match args.debug {
