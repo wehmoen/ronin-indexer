@@ -1,8 +1,10 @@
+use indicatif::ProgressBar;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
+use thousands::Separable;
 
 use log::Level::Info;
 use log::{debug, info, log_enabled, warn};
@@ -669,7 +671,27 @@ impl Ronin {
         }
     }
 
-    pub async fn stream(&self, args: Args, start: Block, stop: Block) {
+    fn progress_bar_msg(&self, start: u64, end: u64, iterations: u64) -> String {
+        format!(
+            "{:>12} / {:>12}",
+            (start + iterations).separate_with_commas(),
+            end.separate_with_commas()
+        )
+    }
+
+    pub async fn stream(
+        &self,
+        args: Args,
+        start: Block,
+        stop: Block,
+        mut progress: Option<ProgressBar>,
+    ) {
+        let mut has_progress_bar = false;
+
+        if !progress.is_none() {
+            has_progress_bar = true;
+        }
+
         if args.debug {
             debug!("W A R N I N G");
             debug!("DEBUG MODE ENABLED! NOT SAVING ANYTHING TO DATABASE!");
@@ -743,6 +765,8 @@ impl Ronin {
 
         let mut current_block: Block = start.to_owned();
         let mut wallet_pool: Pool<Wallet> = self.database.wallets.get_pool();
+
+        let mut iterations: u64 = 0;
 
         loop {
             let block = self
@@ -1104,6 +1128,13 @@ impl Ronin {
             }
 
             current_block += 1;
+
+            if has_progress_bar {
+                let pbar = progress.as_ref().unwrap();
+                pbar.inc(1);
+                iterations += 1;
+                pbar.set_message(self.progress_bar_msg(start, stop, iterations));
+            }
 
             if current_block >= stream_stop_block {
                 break;

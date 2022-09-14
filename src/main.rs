@@ -2,9 +2,11 @@
 extern crate fstrings;
 
 const REORG_SAFTY_OFFSET: u64 = 50;
+
 use crate::cli_args::Args;
 use crate::ronin::Ronin;
 use env_logger::Env;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod cli_args;
@@ -38,15 +40,17 @@ fn chunk_u64(base: u64, max: u64, chunk_size: u64) -> Vec<[u64; 2]> {
     chunks
 }
 
-async fn work(range: [u64; 2], args: Args) {
+async fn work(range: [u64; 2], args: Args, progress: ProgressBar) {
     let db = mongo::connect(&args.db_uri, &args.db_name).await;
     let ronin = Ronin::new(&args.web3_hostname, db).await;
 
-    ronin.stream(args, range[0], range[1]).await;
+    ronin.stream(args, range[0], range[1], Some(progress)).await;
 }
 
 #[tokio::main]
 async fn main() {
+    let global_progress = MultiProgress::new();
+
     let args = cli_args::parse();
 
     let default_log_level = match args.debug {
@@ -105,8 +109,13 @@ async fn main() {
 
     let mut tasks = vec![];
 
+    let progress_bar_style = ProgressStyle::default_spinner().template("{spinner}{bar:80.cyan/blue} {percent:>3}% | [{eta_precise}][{elapsed_precise}] ETA/Elapsed | {msg}").unwrap();
+
     for chunk in chunks {
-        let task = work(chunk, args.clone());
+        let progress = global_progress.add(ProgressBar::new(chunk[1] - chunk[0]));
+        progress.set_style(progress_bar_style.clone());
+
+        let task = work(chunk, args.clone(), progress);
         tasks.push(rt.spawn(task));
     }
 
