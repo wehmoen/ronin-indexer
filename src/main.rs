@@ -2,6 +2,7 @@
 extern crate fstrings;
 
 const REORG_SAFTY_OFFSET: u64 = 50;
+const UPPER_THREAD_LIMIT: usize = 32;
 
 use crate::cli_args::Args;
 use crate::ronin::Ronin;
@@ -82,7 +83,14 @@ async fn main() {
             - REORG_SAFTY_OFFSET
     };
 
-    let available_parallelism = std::thread::available_parallelism().unwrap().get();
+    let mut available_parallelism = std::thread::available_parallelism().unwrap().get();
+    if args.max_thread_count > 0 && args.max_thread_count < available_parallelism {
+        available_parallelism = args.max_thread_count
+    }
+
+    if available_parallelism > UPPER_THREAD_LIMIT {
+        available_parallelism = UPPER_THREAD_LIMIT
+    }
 
     let chunk_size = (1_000_000 / available_parallelism) as u64;
 
