@@ -28,12 +28,12 @@ pub struct Args {
     /// Debug mode
     #[clap(short = 'd', long, value_parser, default_value_t = false)]
     pub debug: bool,
-    /// Debug start block
-    #[clap(short = 's', long, value_parser, default_value_t = 1)]
-    pub debug_start_block: u64,
-    /// Debug stop block
-    #[clap(short = 'e', long, value_parser, default_value_t = 2)]
-    pub debug_stop_block: u64,
+    /// Start block
+    #[clap(short = 's', long, value_parser, default_value_t = 0)]
+    pub start_block: u64,
+    /// Stop block
+    #[clap(short = 'e', long, value_parser, default_value_t = 0)]
+    pub stop_block: u64,
     /// Disable logging of wallet updates
     #[clap(short = 'w', long, value_parser, default_value_t = true)]
     pub debug_disable_wallet_updates: bool,

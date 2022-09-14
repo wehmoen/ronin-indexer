@@ -669,12 +669,12 @@ impl Ronin {
         }
     }
 
-    pub async fn stream(&self, offset: u64, args: Args, start: Block, stop: Block) {
+    pub async fn stream(&self, args: Args, start: Block, stop: Block) {
         if args.debug {
             debug!("W A R N I N G");
             debug!("DEBUG MODE ENABLED! NOT SAVING ANYTHING TO DATABASE!");
-            debug!("Start Block: {}", args.debug_start_block);
-            debug!("Stop Block: {}", args.debug_stop_block);
+            debug!("Start Block: {}", args.start_block);
+            debug!("Stop Block: {}", args.stop_block);
             thread::sleep(Duration::new(1, 0));
         }
 
@@ -723,14 +723,7 @@ impl Ronin {
         let contracts = Ronin::contract_list();
         let transfer_events = Ronin::transfer_events();
 
-        let chain_head_block = self
-            .provider
-            .eth()
-            .block_number()
-            .await
-            .expect("Failed to retrieve head block number from chain!");
-
-        let mut stream_stop_block: Block = stop;
+        let stream_stop_block: Block = stop;
 
         let mut largest_block_by_tx_num: LargestBlock =
             match self.database.settings.get("largest_block_by_tx_num").await {
