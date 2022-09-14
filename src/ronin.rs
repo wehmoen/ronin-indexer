@@ -684,7 +684,7 @@ impl Ronin {
         args: Args,
         start: Block,
         stop: Block,
-        mut progress: Option<ProgressBar>,
+        progress: Option<ProgressBar>,
     ) {
         let mut has_progress_bar = false;
 
@@ -1083,15 +1083,17 @@ impl Ronin {
                     );
                     } else {
                         if current_block.rem_euclid(100) == 0 {
-                            println!(
-                                "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
-                                &current_block,
-                                num_txs,
-                                erc_insert_num,
-                                erc1155_insert_num,
-                                wallet_update_num,
-                                erc_sale_num
-                            );
+                            if !has_progress_bar {
+                                println!(
+                                    "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
+                                    &current_block,
+                                    num_txs,
+                                    erc_insert_num,
+                                    erc1155_insert_num,
+                                    wallet_update_num,
+                                    erc_sale_num
+                                );
+                            }
                         }
                     }
                 }
