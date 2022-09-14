@@ -111,5 +111,8 @@ async fn main() {
     }
 
     futures::future::join_all(tasks).await;
+
+    rt.shutdown_background();
+
     println!("All done!");
 }
