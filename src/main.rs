@@ -84,8 +84,8 @@ async fn main() {
     };
 
     let mut available_parallelism = std::thread::available_parallelism().unwrap().get();
-    if args.max_thread_count > 0 && args.max_thread_count < available_parallelism {
-        available_parallelism = args.max_thread_count
+    if args.threads > 0 && args.threads < available_parallelism {
+        available_parallelism = args.threads
     }
 
     if available_parallelism > UPPER_THREAD_LIMIT {

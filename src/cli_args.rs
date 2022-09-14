@@ -51,7 +51,7 @@ pub struct Args {
     pub feature_wallet_updates: bool,
     /// Max number of threads
     #[clap(long, value_parser, default_value_t = 0)]
-    pub max_thread_count: usize,
+    pub threads: usize,
 }
 
 pub fn parse() -> Args {
