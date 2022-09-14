@@ -2,8 +2,6 @@
 extern crate fstrings;
 
 const REORG_SAFTY_OFFSET: u64 = 50;
-const THREAD_BLOCK_CHUNK_SIZE: u64 = 100000;
-
 use crate::cli_args::Args;
 use crate::ronin::Ronin;
 use env_logger::Env;
@@ -13,7 +11,7 @@ mod cli_args;
 mod mongo;
 mod ronin;
 
-fn chunk_u64(base: u64, max: u64) -> Vec<[u64; 2]> {
+fn chunk_u64(base: u64, max: u64, chunk_size: u64) -> Vec<[u64; 2]> {
     let mut chunks: Vec<[u64; 2]> = vec![];
 
     let mut num = base;
@@ -22,7 +20,7 @@ fn chunk_u64(base: u64, max: u64) -> Vec<[u64; 2]> {
 
     loop {
         let start = num.clone();
-        num += THREAD_BLOCK_CHUNK_SIZE;
+        num += chunk_size;
         let mut end = num.clone();
 
         if end >= max {
@@ -80,8 +78,11 @@ async fn main() {
             - REORG_SAFTY_OFFSET
     };
 
-    let chunks = chunk_u64(sync_start, sync_stop);
     let available_parallelism = std::thread::available_parallelism().unwrap().get();
+
+    let chunk_size = (1_000_000 / available_parallelism) as u64;
+
+    let chunks = chunk_u64(sync_start, sync_stop, chunk_size);
 
     println!(
         "Sync from: {} to {} in {} chunks in {} threads!",
