@@ -2,14 +2,43 @@
 extern crate fstrings;
 
 const REORG_SAFTY_OFFSET: u64 = 50;
+const THREAD_BLOCK_CHUNK_SIZE: u64 = 100000;
 
 use crate::cli_args::Args;
 use crate::ronin::Ronin;
 use env_logger::Env;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod cli_args;
 mod mongo;
 mod ronin;
+
+fn chunk_u64(base: u64, max: u64) -> Vec<[u64; 2]> {
+    let mut chunks: Vec<[u64; 2]> = vec![];
+
+    let mut num = base;
+
+    let mut complete = false;
+
+    loop {
+        let start = num.clone();
+        num += THREAD_BLOCK_CHUNK_SIZE;
+        let mut end = num.clone();
+
+        if end >= max {
+            end = max;
+            complete = true;
+        } else {
+            end -= 1;
+        }
+        chunks.push([start, end]);
+        if complete {
+            break;
+        }
+    }
+
+    chunks
+}
 
 async fn work(range: [u64; 2], args: Args) {
     let db = mongo::connect(&args.db_uri, &args.db_name).await;
@@ -51,27 +80,25 @@ async fn main() {
             - REORG_SAFTY_OFFSET
     };
 
-    let chunk_size: u64 = 100_000;
-
-    let chunks: Vec<[u64; 2]> = (sync_start..=((sync_stop - 1) / chunk_size))
-        .map(|n| {
-            let start = n * chunk_size;
-            let end = (start + chunk_size).min(sync_stop);
-            [start + 1, end]
-        })
-        .collect();
+    let chunks = chunk_u64(sync_start, sync_stop);
+    let available_parallelism = std::thread::available_parallelism().unwrap().get();
 
     println!(
-        "Sync from: {} to {} in {} chunks!",
+        "Sync from: {} to {} in {} chunks in {} threads!",
         sync_start,
         sync_stop,
-        chunks.len()
+        chunks.len(),
+        available_parallelism
     );
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
-        .thread_name("decoder-thread")
+        .thread_name_fn(|| {
+            static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
+            let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
+            format!("fri-{}", id)
+        })
         .build()
         .unwrap();
 
