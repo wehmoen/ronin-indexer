@@ -1138,7 +1138,7 @@ impl Ronin {
                 pbar.set_message(self.progress_bar_msg(start, stop, iterations));
             }
 
-            if current_block >= stream_stop_block {
+            if current_block > stream_stop_block {
                 break;
             }
         }
