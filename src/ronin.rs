@@ -7,6 +7,7 @@ use std::time::Duration;
 use log::Level::Info;
 use log::{debug, info, log_enabled, warn};
 use mongodb::bson::{doc, DateTime};
+use mongodb::options::FindOneOptions;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use web3::ethabi::{Event, EventParam, ParamType, RawLog};
@@ -736,11 +737,17 @@ impl Ronin {
             stream_stop_block = args.debug_stop_block;
         }
 
+        let opts = FindOneOptions::builder()
+            .sort(doc! {
+                "block": -1i64
+            })
+            .build();
+
         let latest_tx = self
             .database
             .transactions
             .collection
-            .find_one(None, None)
+            .find_one(None, opts)
             .await;
 
         let mut start: u64 = match latest_tx.unwrap() {
