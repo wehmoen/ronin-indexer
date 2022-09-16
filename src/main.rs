@@ -9,6 +9,10 @@ use crate::ronin::Ronin;
 use env_logger::Env;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+use tokio::sync::Mutex;
 
 mod cli_args;
 mod mongo;
@@ -41,17 +45,22 @@ fn chunk_u64(base: u64, max: u64, chunk_size: u64) -> Vec<[u64; 2]> {
     chunks
 }
 
-async fn work(range: [u64; 2], args: Args, progress: ProgressBar) {
+async fn work(range: [u64; 2], args: Args, global_progress: Arc<Mutex<MultiProgress>>) {
     let db = mongo::connect(&args.db_uri, &args.db_name).await;
     let ronin = Ronin::new(&args.web3_hostname, db).await;
 
-    ronin.stream(args, range[0], range[1], Some(progress)).await;
+    let gpbar = global_progress.lock().await;
+    let progress = gpbar.add(ProgressBar::new(range[1] - range[0]));
+
+    progress.set_style(
+        ProgressStyle::default_spinner().template("{spinner}{bar:80.cyan/blue} {percent:>3}% | [{eta_precise}][{elapsed_precise}] ETA/Elapsed | {msg}").unwrap()
+    );
+    return ronin.stream(args, range[0], range[1], Some(progress)).await;
 }
 
 #[tokio::main]
 async fn main() {
     let global_progress = MultiProgress::new();
-
     let args = cli_args::parse();
 
     let default_log_level = match args.debug {
@@ -92,7 +101,16 @@ async fn main() {
         available_parallelism = UPPER_THREAD_LIMIT
     }
 
-    let chunk_size = (1_000_000 / available_parallelism) as u64;
+    let chunk_size_base: u64 = if (sync_stop - sync_start) > 1_000_000 {
+        1_000_000
+    } else {
+        sync_stop - sync_start
+    };
+
+    let mut chunk_size = (chunk_size_base / available_parallelism as u64) as u64;
+    if chunk_size <= 0 {
+        chunk_size = 1000;
+    }
 
     let chunks = chunk_u64(sync_start, sync_stop, chunk_size);
 
@@ -107,6 +125,9 @@ async fn main() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
+        .worker_threads(2)
+        .thread_stack_size(1)
+        .max_blocking_threads(1)
         .thread_name_fn(|| {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
             let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
@@ -117,14 +138,23 @@ async fn main() {
 
     let mut tasks = vec![];
 
-    let progress_bar_style = ProgressStyle::default_spinner().template("{spinner}{bar:80.cyan/blue} {percent:>3}% | [{eta_precise}][{elapsed_precise}] ETA/Elapsed | {msg}").unwrap();
+    let arcmutex = Arc::new(Mutex::new(global_progress));
 
-    for chunk in chunks {
-        let progress = global_progress.add(ProgressBar::new(chunk[1] - chunk[0]));
-        progress.set_style(progress_bar_style.clone());
+    let mut i = 0;
+    while i < chunks.len() {
+        if tasks.len() >= available_parallelism {
+            println!("limit reached! waiting");
+            thread::sleep(Duration::from_millis(5000));
+        }
 
-        let task = work(chunk, args.clone(), progress);
-        tasks.push(rt.spawn(task));
+        match chunks[i] {
+            chunk => {
+                println!("Spawning {}", i);
+                let task = work(chunk, args.clone(), arcmutex.clone());
+                tasks.push(rt.spawn(task));
+                i += 1
+            }
+        }
     }
 
     futures::future::join_all(tasks).await;
