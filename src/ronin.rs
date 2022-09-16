@@ -736,10 +736,16 @@ impl Ronin {
             stream_stop_block = args.debug_stop_block;
         }
 
-        let start = self.database.settings.get("last_block").await;
-        let mut start: Block = match start {
+        let latest_tx = self
+            .database
+            .transactions
+            .collection
+            .find_one(None, None)
+            .await;
+
+        let mut start: u64 = match latest_tx.unwrap() {
             None => 1,
-            Some(settings) => settings.value.parse::<u64>().unwrap(),
+            Some(settings) => settings.block,
         };
 
         if args.debug {
@@ -1114,14 +1120,6 @@ impl Ronin {
                     0
                 );
                 }
-            }
-
-            if !args.debug {
-                self.database
-                    .settings
-                    .set("last_block", current_block.to_string())
-                    .await
-                    .expect("Failed to store last_block!");
             }
 
             current_block += 1;
