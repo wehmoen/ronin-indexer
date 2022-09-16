@@ -126,7 +126,6 @@ async fn main() {
         .enable_io()
         .enable_time()
         .worker_threads(2)
-        .thread_stack_size(1)
         .max_blocking_threads(1)
         .thread_name_fn(|| {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
