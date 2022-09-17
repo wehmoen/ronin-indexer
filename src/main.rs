@@ -10,6 +10,7 @@ use env_logger::Env;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
+use tokio::task::JoinHandle;
 
 mod cli_args;
 mod mongo;
@@ -125,12 +126,12 @@ async fn main() {
         .build()
         .unwrap();
 
-    let mut tasks = vec![];
+    let mut tasks: Vec<JoinHandle<()>> = vec![];
 
     let mut i = 0;
     while i < chunks.len() {
         if tasks.len() >= available_parallelism {
-            println!("limit reached! waiting");
+            tasks.retain(|t| !t.is_finished());
             thread::sleep(Duration::from_millis(5000));
         }
 
