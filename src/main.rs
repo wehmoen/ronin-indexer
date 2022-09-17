@@ -7,12 +7,9 @@ const UPPER_THREAD_LIMIT: usize = 32;
 use crate::cli_args::Args;
 use crate::ronin::Ronin;
 use env_logger::Env;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tokio::sync::Mutex;
 
 mod cli_args;
 mod mongo;
@@ -45,22 +42,15 @@ fn chunk_u64(base: u64, max: u64, chunk_size: u64) -> Vec<[u64; 2]> {
     chunks
 }
 
-async fn work(range: [u64; 2], args: Args, global_progress: Arc<Mutex<MultiProgress>>) {
+async fn work(range: [u64; 2], args: Args) {
     let db = mongo::connect(&args.db_uri, &args.db_name).await;
     let ronin = Ronin::new(&args.web3_hostname, db).await;
 
-    let gpbar = global_progress.lock().await;
-    let progress = gpbar.add(ProgressBar::new(range[1] - range[0]));
-
-    progress.set_style(
-        ProgressStyle::default_spinner().template("{spinner}{bar:80.cyan/blue} {percent:>3}% | [{eta_precise}][{elapsed_precise}] ETA/Elapsed | {msg}").unwrap()
-    );
-    return ronin.stream(args, range[0], range[1], Some(progress)).await;
+    return ronin.stream(args, range[0], range[1]).await;
 }
 
 #[tokio::main]
 async fn main() {
-    let global_progress = MultiProgress::new();
     let args = cli_args::parse();
 
     let default_log_level = match args.debug {
@@ -137,8 +127,6 @@ async fn main() {
 
     let mut tasks = vec![];
 
-    let arcmutex = Arc::new(Mutex::new(global_progress));
-
     let mut i = 0;
     while i < chunks.len() {
         if tasks.len() >= available_parallelism {
@@ -149,7 +137,7 @@ async fn main() {
         match chunks[i] {
             chunk => {
                 println!("Spawning {}", i);
-                let task = work(chunk, args.clone(), arcmutex.clone());
+                let task = work(chunk, args.clone());
                 tasks.push(rt.spawn(task));
                 i += 1
             }

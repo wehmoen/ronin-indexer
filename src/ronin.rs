@@ -1,15 +1,14 @@
-use indicatif::ProgressBar;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
-use thousands::Separable;
 
 use log::Level::Info;
 use log::{debug, info, log_enabled, warn};
 use mongodb::bson::{doc, DateTime};
 use serde::{Deserialize, Serialize};
+use thousands::Separable;
 use url::Url;
 use web3::ethabi::{Event, EventParam, ParamType, RawLog};
 use web3::transports::{Either, Http, WebSocket};
@@ -47,7 +46,7 @@ const ERC1155_DEPLOY_BLOCK: Block = 16171588;
 const _ERC721_TOKEN: [&str; 3] = [
     "0xcbb5cc4b59a6993d6fb1ac439761dd5bf751a8c2",
     "0xa96660f0e4a3e9bc7388925d245a6d4d79e21259",
-    "ronin:8c811e3c958e190f5ec15fb376533a3398620500",
+    "0x8c811e3c958e190f5ec15fb376533a3398620500",
 ];
 
 const _ERC20_TOKEN: [&str; 10] = [
@@ -520,6 +519,8 @@ impl Ronin {
                         .iter()
                         .filter(|x| {
                             self.to_string(&x.topics[0]) == ERC_TRANSFER_TOPIC
+                                && self.to_string(&x.address)
+                                    != "0xc99a6a985ed2cac1ef41640596c5a5f9f4e19ef5"
                                 && contracts.contains(&self.to_string(&x.address).as_str())
                         })
                         .collect::<Vec<&Log>>();
@@ -563,10 +564,7 @@ impl Ronin {
                             price: self.to_string(&parsed_sale.params[4].value.to_string()),
                             seller_received: self
                                 .to_string(&parsed_sale.params[4].value.to_string()),
-                            token: self.prefix(
-                                &self.to_string(&parsed_sale.params[3].value.to_string()),
-                                AddressPrefix::Ethereum,
-                            ),
+                            token: self.to_string(&transfer_log[0].address),
                             token_id: self.to_string(&parsed_transfer.params[2].value.to_string()),
                             transaction_id: self.to_string(&tx.transaction_hash),
                             created_at: DateTime::from_millis(
@@ -671,27 +669,7 @@ impl Ronin {
         }
     }
 
-    fn progress_bar_msg(&self, start: u64, end: u64, iterations: u64) -> String {
-        format!(
-            "{:>12} / {:>12}",
-            (start + iterations).separate_with_commas(),
-            end.separate_with_commas()
-        )
-    }
-
-    pub async fn stream(
-        &self,
-        args: Args,
-        start: Block,
-        stop: Block,
-        progress: Option<ProgressBar>,
-    ) {
-        let mut has_progress_bar = false;
-
-        if !progress.is_none() {
-            has_progress_bar = true;
-        }
-
+    pub async fn stream(&self, args: Args, start: Block, stop: Block) {
         if args.debug {
             debug!("W A R N I N G");
             debug!("DEBUG MODE ENABLED! NOT SAVING ANYTHING TO DATABASE!");
@@ -765,8 +743,6 @@ impl Ronin {
 
         let mut current_block: Block = start.to_owned();
         let mut wallet_pool: Pool<Wallet> = self.database.wallets.get_pool();
-
-        let mut iterations: u64 = 0;
 
         loop {
             let block = self
@@ -1074,26 +1050,24 @@ impl Ronin {
                     if log_enabled!(Info) {
                         info!(
                         "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
-                        &current_block,
-                        num_txs,
-                        erc_insert_num,
-                        erc1155_insert_num,
-                        wallet_update_num,
-                        erc_sale_num
+                        &current_block.separate_with_commas(),
+                        num_txs.separate_with_commas(),
+                        erc_insert_num.separate_with_commas(),
+                        erc1155_insert_num.separate_with_commas(),
+                        wallet_update_num.separate_with_commas(),
+                        erc_sale_num.separate_with_commas()
                     );
                     } else {
                         if current_block.rem_euclid(100) == 0 {
-                            if !has_progress_bar {
-                                println!(
+                            println!(
                                     "Block: {:>12}\t\tTransactions: {:>4}\tERC Transfers: {:>5}\tERC 1155 Transfers: {:>5}\tWallet Updates: {:>5}\tERC721 Sales: {:>5}",
-                                    &current_block,
-                                    num_txs,
-                                    erc_insert_num,
-                                    erc1155_insert_num,
-                                    wallet_update_num,
-                                    erc_sale_num
+                                    &current_block.separate_with_commas(),
+                                    num_txs.separate_with_commas(),
+                                    erc_insert_num.separate_with_commas(),
+                                    erc1155_insert_num.separate_with_commas(),
+                                    wallet_update_num.separate_with_commas(),
+                                    erc_sale_num.separate_with_commas()
                                 );
-                            }
                         }
                     }
                 }
@@ -1130,13 +1104,6 @@ impl Ronin {
             }
 
             current_block += 1;
-
-            if has_progress_bar {
-                let pbar = progress.as_ref().unwrap();
-                pbar.inc(1);
-                iterations += 1;
-                pbar.set_message(self.progress_bar_msg(start, stop, iterations));
-            }
 
             if current_block > stream_stop_block {
                 break;
