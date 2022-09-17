@@ -59,6 +59,10 @@ async fn main() {
         false => "warn",
     };
 
+    if args.debug {
+        println!("{:#?}", args);
+    }
+
     env_logger::Builder::from_env(Env::default().default_filter_or(default_log_level)).init();
 
     let db_master = mongo::connect(&args.db_uri, &args.db_name).await;
