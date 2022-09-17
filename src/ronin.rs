@@ -992,7 +992,7 @@ impl Ronin {
                         }
                     }
 
-                    if args.feature_transactions {
+                    if args.feature_transactions == true {
                         let from = f!("0x{tx_from}");
                         let to = f!("0x{tx_to}");
 
