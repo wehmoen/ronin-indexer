@@ -755,7 +755,7 @@ impl Ronin {
             Some(settings) => settings.block,
         };
 
-        if args.debug {
+        if args.debug || args.debug_start_block > 0 {
             start = args.debug_start_block;
         }
 
